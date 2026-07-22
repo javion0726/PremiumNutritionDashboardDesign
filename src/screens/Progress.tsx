@@ -1,36 +1,51 @@
 import { useState } from 'react'
 import { colors, radius } from '../design/tokens'
-import { LineChart, ProgressBar, Card, SectionHeader, AchievementCard, ScreenShell } from '../components/shared'
+import { LineChart, ProgressBar, Card, SectionHeader, AchievementCard, EmptyState, ScreenShell } from '../components/shared'
+import { useAppData } from '../lib/useAppData'
+import { getMeasurements, getJournal, daysAgoKey, fmtKey } from '../lib/store'
+import {
+  calcStreak, calcLongestStreak, computeAchievements, consistencyGrid,
+  strengthHistory, bestSets, mealTotals, getTargets, workoutStats, relativeDate,
+} from '../lib/engine'
+
+function fmt1(n: number) { return (Math.round(n * 10) / 10).toString() }
 
 // ─── Weight Chart ─────────────────────────────────────────────────────────────
 
+const PERIOD_DAYS = { '1M': 30, '3M': 90, '6M': 182, '1Y': 365 } as const
+
 function WeightChart() {
   const [period, setPeriod] = useState<'1M' | '3M' | '6M' | '1Y'>('3M')
+  const meas = getMeasurements()
+    .filter(m => m.weight)
+    .map(m => ({ date: m.date, weight: parseFloat(m.weight!), wu: m.wu || 'lbs' }))
+    .sort((a, b) => a.date.localeCompare(b.date))
 
-  const datasets: Record<string, { data: number[]; labels: string[] }> = {
-    '1M': {
-      data: [198.4, 197.8, 197.2, 196.9, 196.5, 196.8, 196.2, 195.9, 195.5, 195.2, 195.6, 195.0, 194.8, 194.5, 194.2, 194.6, 194.0, 193.7, 193.5, 193.2, 193.0, 192.8, 192.5, 192.2, 192.0, 191.8, 191.5, 191.2, 191.0, 190.8],
-      labels: ['Jun 19', '', '', '', '', 'Jun 24', '', '', '', '', 'Jun 29', '', '', '', '', 'Jul 4', '', '', '', '', 'Jul 9', '', '', '', '', 'Jul 14', '', '', '', 'Jul 19'],
-    },
-    '3M': {
-      data: [204, 202, 200, 199, 198, 197, 196, 195, 194, 193, 192, 191],
-      labels: ['Apr', '', '', 'May', '', '', 'Jun', '', '', 'Jul', '', ''],
-    },
-    '6M': {
-      data: [215, 210, 207, 204, 201, 198, 196, 193, 191],
-      labels: ['Jan', '', 'Feb', '', 'Mar', '', 'May', '', 'Jul'],
-    },
-    '1Y': {
-      data: [224, 219, 213, 210, 207, 204, 201, 198, 196, 193, 191, 190.8],
-      labels: ['Jul\'24', '', 'Sep', '', 'Nov', '', 'Jan', '', 'Mar', '', 'May', 'Jul'],
-    },
+  if (meas.length < 2) {
+    return (
+      <Card style={{ padding: '20px' }}>
+        <p style={{ color: colors.textMuted, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', margin: '0 0 10px' }}>Body Weight</p>
+        <EmptyState icon="⚖️" title="Log your weight to see trends" body="Add at least two weight entries in Profile → Body Measurements to unlock this chart." />
+      </Card>
+    )
   }
 
-  const { data, labels } = datasets[period]
+  const cutoff = fmtKey(new Date(Date.now() - PERIOD_DAYS[period] * 864e5))
+  const windowed = meas.filter(m => m.date >= cutoff)
+  const shown = windowed.length >= 2 ? windowed : meas.slice(-2)
+  const data = shown.map(m => m.weight)
   const current = data[data.length - 1]
   const start = data[0]
   const change = (current - start).toFixed(1)
   const isLoss = parseFloat(change) < 0
+  const unit = shown[0].wu
+
+  // Sparse labels along the range
+  const labelCount = Math.min(5, shown.length)
+  const labels = Array.from({ length: labelCount }, (_, i) => {
+    const idx = Math.round((i / (labelCount - 1 || 1)) * (shown.length - 1))
+    return new Date(shown[idx].date).toLocaleDateString('en-US', { month: 'short', day: shown.length <= 12 ? undefined : 'numeric' })
+  })
 
   return (
     <Card style={{ padding: '20px' }}>
@@ -38,8 +53,8 @@ function WeightChart() {
         <div>
           <p style={{ color: colors.textMuted, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', margin: '0 0 4px' }}>Body Weight</p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ color: colors.white, fontSize: 30, fontWeight: 800, letterSpacing: '-1px' }}>{current}</span>
-            <span style={{ color: colors.textMuted, fontSize: 14 }}>lbs</span>
+            <span style={{ color: colors.white, fontSize: 30, fontWeight: 800, letterSpacing: '-1px' }}>{fmt1(current)}</span>
+            <span style={{ color: colors.textMuted, fontSize: 14 }}>{unit}</span>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -49,7 +64,7 @@ function WeightChart() {
             borderRadius: radius.full, padding: '4px 10px',
             color: isLoss ? colors.green : colors.danger, fontSize: 13, fontWeight: 700,
           }}>
-            {isLoss ? '▼' : '▲'} {Math.abs(parseFloat(change))} lbs
+            {isLoss ? '▼' : '▲'} {Math.abs(parseFloat(change))} {unit}
           </span>
           <p style={{ color: colors.textDim, fontSize: 11, margin: '4px 0 0', fontFamily: 'Inter, sans-serif' }}>vs {period} ago</p>
         </div>
@@ -58,7 +73,7 @@ function WeightChart() {
       <div style={{ margin: '16px 0' }}>
         <LineChart data={data} color={colors.green} height={90} />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
-          {labels.filter(Boolean).slice(0, 5).map((l, i) => (
+          {labels.map((l, i) => (
             <span key={i} style={{ color: colors.textDim, fontSize: 10, fontFamily: 'Inter, sans-serif' }}>{l}</span>
           ))}
         </div>
@@ -81,13 +96,26 @@ function WeightChart() {
 
 // ─── Strength Progress ────────────────────────────────────────────────────────
 
+const TRACKED_LIFTS = ['Bench Press', 'Barbell Squat', 'Deadlift', 'Barbell Overhead Press']
+const LIFT_LABEL: Record<string, string> = { 'Bench Press': 'Bench Press', 'Barbell Squat': 'Squat', 'Deadlift': 'Deadlift', 'Barbell Overhead Press': 'OHP' }
+
 function StrengthProgress() {
-  const lifts = [
-    { name: 'Bench Press', current: 225, start: 175, unit: 'lbs', data: [175, 185, 195, 200, 205, 215, 220, 225] },
-    { name: 'Squat', current: 315, start: 245, unit: 'lbs', data: [245, 260, 270, 280, 290, 300, 310, 315] },
-    { name: 'Deadlift', current: 365, start: 275, unit: 'lbs', data: [275, 295, 310, 325, 340, 350, 360, 365] },
-    { name: 'OHP', current: 145, start: 105, unit: 'lbs', data: [105, 110, 115, 120, 125, 130, 140, 145] },
-  ]
+  const lifts = TRACKED_LIFTS.map(name => {
+    const hist = strengthHistory(name)
+    if (hist.length < 2) return null
+    const current = hist[hist.length - 1].weight
+    const start = hist[0].weight
+    return { name: LIFT_LABEL[name], current, start, data: hist.map(h => h.weight) }
+  }).filter((l): l is NonNullable<typeof l> => !!l)
+
+  if (!lifts.length) {
+    return (
+      <Card style={{ padding: '20px' }}>
+        <p style={{ color: colors.white, fontSize: 15, fontWeight: 700, margin: '0 0 10px' }}>Strength Progress</p>
+        <EmptyState icon="🏋️" title="Log lifts to track strength" body="Once you've logged the same exercise on two different days with weight, its progress line appears here." />
+      </Card>
+    )
+  }
 
   return (
     <Card style={{ padding: '20px' }}>
@@ -95,13 +123,15 @@ function StrengthProgress() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {lifts.map((lift) => {
           const gain = lift.current - lift.start
-          const gainPct = Math.round((gain / lift.start) * 100)
+          const gainPct = lift.start ? Math.round((gain / lift.start) * 100) : 0
           return (
             <div key={lift.name}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ color: colors.white, fontSize: 13, fontWeight: 600 }}>{lift.name}</span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span style={{ color: colors.green, fontSize: 11, fontWeight: 600 }}>+{gain} lbs ({gainPct}%)</span>
+                  <span style={{ color: gain >= 0 ? colors.green : colors.danger, fontSize: 11, fontWeight: 600 }}>
+                    {gain >= 0 ? '+' : ''}{fmt1(gain)} lbs ({gainPct}%)
+                  </span>
                   <span style={{ color: colors.white, fontSize: 14, fontWeight: 800 }}>{lift.current}</span>
                 </div>
               </div>
@@ -119,17 +149,9 @@ function StrengthProgress() {
 // ─── Consistency Heatmap ──────────────────────────────────────────────────────
 
 function ConsistencyHeatmap() {
-  // 10 weeks × 7 days
-  const weeks = Array.from({ length: 10 }, (_, w) =>
-    Array.from({ length: 7 }, (_, d) => {
-      const idx = w * 7 + d
-      if (idx > 68) return -1 // future
-      return Math.random() > 0.35 ? Math.floor(Math.random() * 3) + 1 : 0
-    })
-  )
+  const { grid, activePct } = consistencyGrid()
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
   const intensityColor = (v: number) => {
-    if (v === -1) return 'rgba(255,255,255,0.02)'
     if (v === 0) return 'rgba(255,255,255,0.05)'
     if (v === 1) return `${colors.green}40`
     if (v === 2) return `${colors.green}80`
@@ -140,7 +162,7 @@ function ConsistencyHeatmap() {
     <Card style={{ padding: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <p style={{ color: colors.white, fontSize: 15, fontWeight: 700, margin: 0 }}>Consistency</p>
-        <span style={{ color: colors.green, fontSize: 13, fontWeight: 700 }}>71% active days</span>
+        <span style={{ color: colors.green, fontSize: 13, fontWeight: 700 }}>{activePct}% active days</span>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 2 }}>
@@ -149,13 +171,13 @@ function ConsistencyHeatmap() {
           ))}
         </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-          {weeks.map((week, w) => (
+          {Array.from({ length: 12 }, (_, w) => (
             <div key={w} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
-              {week.map((v, d) => (
+              {grid.map((row, d) => (
                 <div key={d} style={{
                   height: 12, borderRadius: 3,
-                  background: intensityColor(v),
-                  boxShadow: v > 0 ? `0 0 4px ${colors.green}20` : 'none',
+                  background: intensityColor(row[w]),
+                  boxShadow: row[w] > 0 ? `0 0 4px ${colors.green}20` : 'none',
                 }} />
               ))}
             </div>
@@ -173,17 +195,36 @@ function ConsistencyHeatmap() {
   )
 }
 
-// ─── Milestones ───────────────────────────────────────────────────────────────
+// ─── Milestones (derived from real streak/weight/workout data) ───────────────
 
 function Milestones() {
-  const items = [
-    { icon: '⚖️', label: 'Lost 10 lbs', date: 'Jun 2', done: true },
-    { icon: '🏋️', label: '100 Workouts', date: 'May 18', done: true },
-    { icon: '💪', label: 'Bench 2-plate', date: 'Jun 30', done: true },
-    { icon: '💧', label: 'Hydration — 30 days', date: 'In progress', done: false, progress: 0.77 },
-    { icon: '🔥', label: '30-Day Streak', date: 'In progress', done: false, progress: 0.2 },
-    { icon: '⚖️', label: 'Lost 20 lbs total', date: 'Upcoming', done: false, progress: 0.5 },
-  ]
+  const longest = calcLongestStreak()
+  const streak = calcStreak()
+  const { total } = workoutStats()
+  const meas = getMeasurements().filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date))
+  const lost = meas.length >= 2 ? parseFloat(meas[0].weight!) - Math.min(...meas.map(m => parseFloat(m.weight!))) : 0
+  const bench = bestSets().get('Bench Press')?.weight ?? 0
+
+  const items: { icon: string; label: string; date: string; done: boolean; progress?: number }[] = []
+  if (lost >= 10) {
+    const minWeight = Math.min(...meas.map(m => parseFloat(m.weight!)))
+    const hitDate = meas.find(m => parseFloat(m.weight!) === minWeight)?.date ?? meas[meas.length - 1].date
+    items.push({ icon: '⚖️', label: 'Lost 10 lbs', date: relativeDate(hitDate), done: true })
+  } else if (meas.length) {
+    items.push({ icon: '⚖️', label: 'Lose 10 lbs', date: 'In progress', done: false, progress: Math.min(1, lost / 10) })
+  }
+
+  items.push(total >= 100
+    ? { icon: '🏋️', label: '100 Workouts', date: `${total} logged`, done: true }
+    : { icon: '🏋️', label: '100 Workouts', date: 'In progress', done: false, progress: total / 100 })
+
+  items.push(bench >= 225
+    ? { icon: '💪', label: 'Bench 2-plate', date: `${bench} lbs`, done: true }
+    : { icon: '💪', label: 'Bench 2-plate (225 lbs)', date: 'In progress', done: false, progress: bench / 225 })
+
+  items.push(longest >= 30
+    ? { icon: '🔥', label: '30-Day Streak', date: `Best: ${longest} days`, done: true }
+    : { icon: '🔥', label: '30-Day Streak', date: streak > 0 ? `${streak} days so far` : 'Start today', done: false, progress: streak / 30 })
 
   return (
     <Card style={{ padding: '20px' }}>
@@ -208,7 +249,7 @@ function Milestones() {
                 </span>
               </div>
               {m.progress != null && !m.done && (
-                <ProgressBar value={m.progress * 100} max={100} color={colors.green} height={4} />
+                <ProgressBar value={Math.max(0, Math.min(1, m.progress)) * 100} max={100} color={colors.green} height={4} />
               )}
             </div>
           </div>
@@ -221,11 +262,23 @@ function Milestones() {
 // ─── Weekly Report ────────────────────────────────────────────────────────────
 
 function WeeklyReport() {
+  const j = getJournal()
+  const targets = getTargets()
+  const weekKeys = Array.from({ length: 7 }, (_, i) => daysAgoKey(i))
+  const workoutsThisWeek = weekKeys.filter(k => j[k]?.exArr?.some(x => x.sets.some(s => s.done))).length
+  const calDays = weekKeys.map(k => mealTotals(j[k]?.mealArr).cal).filter(c => c > 0)
+  const protDays = weekKeys.map(k => mealTotals(j[k]?.mealArr).prot).filter(p => p > 0)
+  const avgCal = calDays.length ? Math.round(calDays.reduce((a, b) => a + b, 0) / calDays.length) : 0
+  const avgProt = protDays.length ? Math.round(protDays.reduce((a, b) => a + b, 0) / protDays.length) : 0
+
+  const meas = getMeasurements().filter(m => m.weight && m.date >= daysAgoKey(7)).sort((a, b) => a.date.localeCompare(b.date))
+  const weightDelta = meas.length >= 2 ? (parseFloat(meas[meas.length - 1].weight!) - parseFloat(meas[0].weight!)) : null
+
   const stats = [
-    { label: 'Workouts', value: '5', sub: 'of 6 planned', color: colors.green },
-    { label: 'Avg Calories', value: '2,310', sub: 'kcal/day', color: colors.blue },
-    { label: 'Protein Avg', value: '142g', sub: 'of 180g goal', color: colors.gold },
-    { label: 'Weight Δ', value: '–1.2', sub: 'lbs this week', color: colors.green },
+    { label: 'Workouts', value: String(workoutsThisWeek), sub: 'this week', color: colors.green },
+    { label: 'Avg Calories', value: avgCal ? avgCal.toLocaleString() : '—', sub: avgCal ? 'kcal/day' : 'No meals logged', color: colors.blue },
+    { label: 'Protein Avg', value: avgProt ? `${avgProt}g` : '—', sub: avgProt ? `of ${targets.protein}g goal` : 'No meals logged', color: colors.gold },
+    { label: 'Weight Δ', value: weightDelta !== null ? (weightDelta >= 0 ? `+${fmt1(weightDelta)}` : fmt1(weightDelta)) : '—', sub: weightDelta !== null ? 'lbs this week' : 'Not enough data', color: colors.green },
   ]
 
   return (
@@ -253,9 +306,64 @@ function WeeklyReport() {
   )
 }
 
+// ─── Body Measurements summary ────────────────────────────────────────────────
+
+function BodyMeasurements() {
+  const meas = getMeasurements()
+  if (!meas.length) {
+    return (
+      <Card style={{ padding: '20px' }}>
+        <EmptyState icon="📏" title="No measurements yet" body="Log your weight and body measurements in Profile to see trends here." />
+      </Card>
+    )
+  }
+  const sorted = [...meas].sort((a, b) => a.date.localeCompare(b.date))
+  const first = sorted[0], last = sorted[sorted.length - 1]
+
+  function metric(label: string, key: keyof typeof first, unit: string) {
+    const lv = last[key], fv = first[key]
+    if (!lv) return null
+    const delta = fv && lv ? (parseFloat(String(lv)) - parseFloat(String(fv))) : null
+    return (
+      <div key={label} style={{ textAlign: 'center' }}>
+        <p style={{ color: colors.white, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1 }}>
+          {lv}<span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 400 }}> {unit}</span>
+        </p>
+        <p style={{ color: colors.textMuted, fontSize: 11, margin: '3px 0 3px', fontWeight: 500 }}>{label}</p>
+        {delta !== null && (
+          <p style={{ color: delta <= 0 ? colors.green : colors.gold, fontSize: 10, margin: 0, fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>
+            {delta >= 0 ? '+' : ''}{fmt1(delta)}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const cells = [
+    metric('Weight', 'weight', last.wu || 'lbs'),
+    metric('Body Fat', 'fat', '%'),
+    metric('Waist', 'waist', last.mu || 'in'),
+    metric('Chest', 'chest', last.mu || 'in'),
+    metric('Arms', 'arms', last.mu || 'in'),
+    metric('Hips', 'hips', last.mu || 'in'),
+  ].filter(Boolean)
+
+  return (
+    <Card style={{ padding: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        {cells}
+      </div>
+    </Card>
+  )
+}
+
 // ─── Progress Screen ──────────────────────────────────────────────────────────
 
 export default function ProgressScreen() {
+  useAppData()
+  const achievements = computeAchievements()
+  const unlockedCount = achievements.filter(a => a.unlocked).length
+
   return (
     <ScreenShell>
       <div style={{ padding: '56px 24px 20px', animation: 'fadeUp 0.4s ease both' }}>
@@ -275,43 +383,17 @@ export default function ProgressScreen() {
         <Milestones />
 
         <SectionHeader title="Achievements" action={
-          <span style={{ color: colors.textDim, fontSize: 12, fontFamily: 'Inter, sans-serif' }}>12 unlocked</span>
+          <span style={{ color: colors.textDim, fontSize: 12, fontFamily: 'Inter, sans-serif' }}>{unlockedCount} unlocked</span>
         } />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <AchievementCard icon="🔥" title="7-Day Streak" desc="7 consecutive training days" unlocked delay={0} />
-          <AchievementCard icon="💪" title="Bench 2-plate" desc="225 lbs bench press" unlocked delay={60} />
-          <AchievementCard icon="💧" title="Hydration Pro" desc="5-day water goal streak" unlocked delay={120} />
-          <AchievementCard icon="⚖️" title="First 10 lbs" desc="Lost first 10 lbs" unlocked delay={180} />
-          <AchievementCard icon="🏋️" title="Century Club" desc="100 workouts logged" unlocked delay={240} />
-          <AchievementCard icon="🥗" title="Macro Master" desc="7-day macro perfection" unlocked={false} delay={300} />
-          <AchievementCard icon="🏆" title="PR Week" desc="3 PRs in a single week" unlocked={false} delay={360} />
-          <AchievementCard icon="🔥" title="30-Day Streak" desc="30 consecutive days" unlocked={false} delay={420} />
+          {achievements.map((a, i) => (
+            <AchievementCard key={a.id} icon={a.icon} title={a.title} desc={a.desc} unlocked={a.unlocked} delay={i * 60} />
+          ))}
         </div>
 
-        {/* Body stats */}
         <SectionHeader title="Body Measurements" />
-
-        <Card style={{ padding: '20px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            {[
-              { label: 'Weight', value: '190.8', unit: 'lbs', delta: '–13.2' },
-              { label: 'Body Fat', value: '18.4', unit: '%', delta: '–3.1%' },
-              { label: 'Muscle', value: '155.6', unit: 'lbs', delta: '+4.8' },
-              { label: 'Waist', value: '34.5', unit: 'in', delta: '–2.5' },
-              { label: 'Chest', value: '42', unit: 'in', delta: '+0.5' },
-              { label: 'Arms', value: '15.2', unit: 'in', delta: '+0.8' },
-            ].map((m) => (
-              <div key={m.label} style={{ textAlign: 'center' }}>
-                <p style={{ color: colors.white, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1 }}>
-                  {m.value}<span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 400 }}> {m.unit}</span>
-                </p>
-                <p style={{ color: colors.textMuted, fontSize: 11, margin: '3px 0 3px', fontWeight: 500 }}>{m.label}</p>
-                <p style={{ color: colors.green, fontSize: 10, margin: 0, fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>{m.delta}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <BodyMeasurements />
       </div>
     </ScreenShell>
   )

@@ -77,3 +77,16 @@ html, body {
 .progress-bar-animated {
   animation: fillBar 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
 }
+
+
+/* Accessibility: user- or system-requested reduced motion */
+.reduced-motion *, .reduced-motion *::before, .reduced-motion *::after {
+  animation-duration: 0.001s !important;
+  transition-duration: 0.001s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001s !important;
+    transition-duration: 0.001s !important;
+  }
+}
