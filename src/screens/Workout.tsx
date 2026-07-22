@@ -6,6 +6,10 @@ import { getDay, saveDay, todayKey, type ExEntry, type SetRow } from '../lib/sto
 import { bestSets, relativeDate, workoutVolume } from '../lib/engine'
 import { EX } from '../lib/exercises'
 
+function ytURL(name: string): string {
+  return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' exercise tutorial form')
+}
+
 // ─── Rest Timer ───────────────────────────────────────────────────────────────
 
 function RestTimer({ onDone }: { onDone: () => void }) {
@@ -130,6 +134,19 @@ function ExerciseRow({ ex, exIdx, isPR, onChange, onRemove, onSetDone }: {
             {first?.r ? ` · ${first.r} reps` : ''}{first?.w ? ` · ${first.w} lbs` : ''}
           </p>
         </div>
+        <a
+          href={ytURL(ex.name)} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          aria-label={`Watch ${ex.name} tutorial on YouTube`}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+            color: colors.danger, textDecoration: 'none', fontSize: 13,
+          }}
+        >
+          ▶
+        </a>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={colors.textDim} strokeWidth="1.5" strokeLinecap="round"
           style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }}>
           <path d="M4 6l4 4 4-4" />
@@ -248,14 +265,30 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
         )}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {list.map(name => (
-            <button key={name} onClick={() => onPick(name)} style={{
-              textAlign: 'left', background: 'none', border: 'none',
-              borderBottom: `1px solid ${colors.border}`, padding: '13px 4px',
-              color: colors.white, fontSize: 14, fontWeight: 500, cursor: 'pointer',
-              fontFamily: 'Inter, sans-serif',
+            <div key={name} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              borderBottom: `1px solid ${colors.border}`,
             }}>
-              {name}
-            </button>
+              <button onClick={() => onPick(name)} style={{
+                flex: 1, textAlign: 'left', background: 'none', border: 'none',
+                padding: '13px 4px', color: colors.white, fontSize: 14, fontWeight: 500,
+                cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+              }}>
+                {name}
+              </button>
+              <a
+                href={ytURL(name)} target="_blank" rel="noopener noreferrer"
+                aria-label={`Watch ${name} tutorial on YouTube`}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 30, height: 30, borderRadius: 8, flexShrink: 0, marginRight: 4,
+                  background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                  color: colors.danger, textDecoration: 'none', fontSize: 12,
+                }}
+              >
+                ▶
+              </a>
+            </div>
           ))}
           {!list.length && (
             <p style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', padding: 24, fontFamily: 'Inter, sans-serif' }}>

@@ -5,7 +5,8 @@ import WorkoutScreen from './screens/Workout'
 import NutritionScreen from './screens/Nutrition'
 import ProgressScreen from './screens/Progress'
 import ProfileScreen from './screens/Profile'
-import { runMigrations } from './lib/store'
+import Onboarding from './screens/Onboarding'
+import { runMigrations, getConfig, isOnboarded } from './lib/store'
 
 export type Tab = 'home' | 'workout' | 'nutrition' | 'progress' | 'profile'
 
@@ -16,8 +17,16 @@ export function useNav() { return useContext(NavContext) }
 // Old-schema data (from the previous Ascend deploy) is migrated before first render.
 runMigrations()
 
+// Show onboarding only for genuinely new users — same rule as the original app
+// (no name saved yet, and the flow hasn't already been completed). Anyone whose
+// data migrated in from the old deploy already has a name, so they skip straight in.
+function needsOnboarding(): boolean {
+  return !getConfig().name?.trim() && !isOnboarded()
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('home')
+  const [onboarding, setOnboarding] = useState(needsOnboarding)
 
   // Scroll to top on tab change — matches the prototype's fresh-screen feel.
   useEffect(() => { window.scrollTo(0, 0) }, [tab])
@@ -28,6 +37,10 @@ export default function App() {
     nutrition: <NutritionScreen />,
     progress: <ProgressScreen />,
     profile: <ProfileScreen />,
+  }
+
+  if (onboarding) {
+    return <Onboarding onDone={() => setOnboarding(false)} />
   }
 
   return (

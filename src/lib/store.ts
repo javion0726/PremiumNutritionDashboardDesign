@@ -38,6 +38,8 @@ export type Config = {
   notifications: Record<string, boolean>
   metricUnits: boolean
   reducedMotion: boolean
+  goal?: string             // primary goal chosen at onboarding
+  daysPerWeek?: string      // training frequency chosen at onboarding
 }
 
 export type GoalResults = { calories: number; protein: number; carbs: number; fats: number }
@@ -212,7 +214,12 @@ export function importBackup(text: string): { ok: boolean; error?: string } {
 }
 
 export function clearAllData() {
-  for (const k of [...BACKUP_KEYS, 'rj_schema', 'rj_journal_prev2']) {
+  for (const k of [...BACKUP_KEYS, 'rj_schema', 'rj_journal_prev2', 'rj_ob_done']) {
     try { localStorage.removeItem(k) } catch { /* noop */ }
   }
 }
+
+// ─── onboarding ───────────────────────────────────────────────────────────────
+
+export function isOnboarded(): boolean { return load<boolean>('rj_ob_done', false) }
+export function markOnboarded() { save('rj_ob_done', true) }
