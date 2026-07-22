@@ -1,0 +1,10 @@
+{
+  "description": "Track your nutrition effortlessly with a sleek dashboard that monitors calories, macros, hydration, and provides personalized insights for fitness enthusiasts.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
