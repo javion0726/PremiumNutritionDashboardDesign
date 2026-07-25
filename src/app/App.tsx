@@ -930,7 +930,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
             <div key={name} className="flex items-center gap-2 border-b" style={{ borderColor: C.border }}>
               <button onClick={() => onPick(name)} className="flex-1 min-w-0 text-left py-3">
                 <p className="text-sm font-medium" style={{ color: C.pri }}>{name}</p>
-                <p className="text-xs mt-0.5 truncate" style={{ color: C.accent }}>Targets: {targets}</p>
+                <p className="text-xs mt-0.5" style={{ color: C.accent }}>Targets: {targets}</p>
               </button>
               <a href={ytURL(name)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
                 aria-label={`Watch ${name} tutorial on YouTube`}
