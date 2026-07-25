@@ -686,13 +686,20 @@ function DashboardScreen({
 
 // ─── WORKOUT ─────────────────────────────────────────────────────────────────
 
-function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }: {
+function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, onComplete, onExit, allowAddExercise, onExercisesChange }: {
   exercises: Exercise[]; planName: string; dayLabel: string;
   onComplete: () => void; onExit: () => void;
+  allowAddExercise?: boolean;
+  onExercisesChange?: (exercises: Exercise[]) => void;
 }) {
   const cfg = getConfig();
   const restDefault = cfg.restTimerSeconds ?? 90;
   const key = todayKey();
+
+  // Exercises are kept in local state (seeded from the prop) so more can be
+  // appended mid-session — e.g. a custom workout that grows as you train.
+  const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
+  const [showPicker, setShowPicker] = useState(false);
 
   // Set logs are persisted to the real journal (rj_journal) as they're entered —
   // not just held in local state — so a refresh or tab switch never loses a set.
@@ -708,6 +715,16 @@ function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
 
+  function addExerciseMidSession(name: string) {
+    const ex: Exercise = { name, sets: 3, reps: "10", weight: "" };
+    const nextExercises = [...exercises, ex];
+    setExercises(nextExercises);
+    setSetLogs(prev => [...prev, Array.from({ length: 3 }, () => ({ weight: "", reps: "", done: false }))]);
+    setExIdx(nextExercises.length - 1);
+    setShowPicker(false);
+    onExercisesChange?.(nextExercises);
+  }
+
   // Persist to the journal any time set logs change.
   useEffect(() => {
     const exArr: ExEntry[] = exercises.map((ex, i) => ({
@@ -720,7 +737,7 @@ function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }
     }));
     saveDay(key, { exArr, wType: planName ? `${planName} · ${dayLabel}` : dayLabel, startedAt: getDay(key).startedAt ?? Date.now() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setLogs]);
+  }, [setLogs, exercises]);
 
   useEffect(() => {
     if (restSeconds === null || restSeconds <= 0 || isPaused) return;
@@ -810,8 +827,17 @@ function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }
               </button>
             );
           })}
+          {allowAddExercise && (
+            <button onClick={() => setShowPicker(true)} aria-label="Add exercise"
+              className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center border"
+              style={{ background: C.surface, borderColor: C.border, color: C.accent }}>
+              <Plus size={14} />
+            </button>
+          )}
         </div>
       </div>
+
+      {showPicker && <ExercisePicker onPick={addExerciseMidSession} onClose={() => setShowPicker(false)} />}
 
       {/* Current exercise */}
       <div className="flex-1 px-5 pb-8 flex flex-col gap-4">
@@ -904,7 +930,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
   return (
     <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "78vh", overflowY: "auto", background: C.bg,
+        maxWidth: 430, maxHeight: "78dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
       }}>
         <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
@@ -1104,6 +1130,12 @@ function WorkoutScreen({
         dayLabel={new Date(customSession.startedAt).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
         onComplete={finishCustom}
         onExit={() => setShowCustomActive(false)}
+        allowAddExercise
+        onExercisesChange={(exs) => {
+          const updated = { ...customSession, exercises: exs };
+          saveActiveCustomSession(updated);
+          setCustomSession(updated);
+        }}
       />
     );
   }
@@ -1478,7 +1510,7 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "80vh", overflowY: "auto", background: C.bg,
+        maxWidth: 430, maxHeight: "80dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
       }}>
         <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
@@ -1906,7 +1938,7 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "85vh", overflowY: "auto", background: C.bg,
+        maxWidth: 430, maxHeight: "85dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
       }}>
         <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
