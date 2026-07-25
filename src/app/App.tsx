@@ -922,6 +922,16 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, on
 // Swipe-down-to-dismiss for bottom sheets. Drag the handle down past the
 // threshold (or drag more than halfway with any speed) to close; otherwise
 // it snaps back. Works with touch and mouse via pointer events.
+// Locks the page behind any open bottom sheet so fast swipes near the top or
+// bottom of the sheet's own list can't "chain" into scrolling the background.
+function useLockBodyScroll() {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+}
+
 function useSwipeToDismiss(onClose: () => void) {
   const [dragY, setDragY] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -959,6 +969,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
   const list = query.trim()
     ? cats.flatMap(c => EX[c].x.filter(x => x.toLowerCase().includes(query.trim().toLowerCase())).map(x => ({ name: x, targets: EX[c].m })))
     : (EX[cat]?.x ?? []).map(x => ({ name: x, targets: EX[cat].m }));
+  useLockBodyScroll();
   const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
 
   return (
@@ -997,7 +1008,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
         </div>
 
         {/* Scrollable exercise list — only this region scrolls, so the header above stays put. */}
-        <div className="flex-1 overflow-y-auto px-5" style={{ WebkitOverflowScrolling: "touch", paddingBottom: 32 }}>
+        <div className="flex-1 overflow-y-auto px-5" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", paddingBottom: 32 }}>
           {list.map(({ name, targets }) => (
             <div key={name} className="flex items-center gap-2 border-b" style={{ borderColor: C.border }}>
               <button onClick={() => onPick(name)} className="flex-1 min-w-0 text-left py-3">
@@ -1553,12 +1564,13 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
     borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
   };
 
+  useLockBodyScroll();
   const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "80dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
+        maxWidth: 430, maxHeight: "80dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
         ...sheetStyle,
       }}>
@@ -1989,12 +2001,13 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
     borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
   };
 
+  useLockBodyScroll();
   const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "85dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
+        maxWidth: 430, maxHeight: "85dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
         ...sheetStyle,
       }}>
