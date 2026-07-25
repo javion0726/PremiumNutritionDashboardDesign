@@ -919,6 +919,39 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, on
 
 // ─── NUTRITION ────────────────────────────────────────────────────────────────
 
+// Swipe-down-to-dismiss for bottom sheets. Drag the handle down past the
+// threshold (or drag more than halfway with any speed) to close; otherwise
+// it snaps back. Works with touch and mouse via pointer events.
+function useSwipeToDismiss(onClose: () => void) {
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startY = useRef(0);
+
+  const handlers = {
+    onPointerDown: (e: React.PointerEvent) => {
+      startY.current = e.clientY;
+      setDragging(true);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!dragging) return;
+      const delta = e.clientY - startY.current;
+      if (delta > 0) setDragY(delta);
+    },
+    onPointerUp: () => {
+      setDragging(false);
+      if (dragY > 90) onClose();
+      else setDragY(0);
+    },
+  };
+
+  const sheetStyle: React.CSSProperties = {
+    transform: dragY ? `translateY(${dragY}px)` : undefined,
+    transition: dragging ? "none" : "transform 0.2s ease",
+  };
+
+  return { handlers, sheetStyle };
+}
+
 function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<string>(Object.keys(EX)[0]);
@@ -926,18 +959,25 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
   const list = query.trim()
     ? cats.flatMap(c => EX[c].x.filter(x => x.toLowerCase().includes(query.trim().toLowerCase())).map(x => ({ name: x, targets: EX[c].m })))
     : (EX[cat]?.x ?? []).map(x => ({ name: x, targets: EX[cat].m }));
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col" style={{
         maxWidth: 430, height: "85dvh", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, overflow: "hidden",
+        ...sheetStyle,
       }}>
         {/* Sticky header — drag handle, title, search, and category chips are always
             visible; they never get pushed out of view by the scrollable list below. */}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-3" style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
-          <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
-          <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
+          <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+          <div className="flex items-center justify-between">
+            <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
+            <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+              <X size={16} />
+            </button>
+          </div>
           <input
             placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
             className="w-full box-border px-4 py-3 rounded-xl text-sm outline-none border"
@@ -1513,14 +1553,22 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
     borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
   };
 
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
         maxWidth: 430, maxHeight: "80dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
       }}>
-        <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
-        <p className="text-lg font-bold" style={{ color: C.pri }}>Log meal</p>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>Log meal</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
         <div className="flex gap-2">
           {MEAL_SLOTS.map(t => (
             <button key={t} onClick={() => setType(t)}
@@ -1941,14 +1989,22 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
     borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
   };
 
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
         maxWidth: 430, maxHeight: "85dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
       }}>
-        <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
-        <p className="text-lg font-bold" style={{ color: C.pri }}>New goal</p>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>New goal</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
 
         <Input label="Goal title" value={title} onChange={setTitle} placeholder="Reach 180 lbs body weight" />
 
