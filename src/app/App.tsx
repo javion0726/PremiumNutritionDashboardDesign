@@ -19,6 +19,7 @@ import { PLANS, type WeeklyPlan, type PlanDay, type Exercise } from "./lib/plans
 import {
   getConfig, saveConfig, isOnboarded, markOnboarded, runMigrations,
   getActivePlan, saveActivePlan, type ActivePlan,
+  getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, todayKey, type ExEntry,
   getMeasurements, saveMeasurements,
@@ -461,9 +462,10 @@ function DashboardScreen({
   const cfg = getConfig();
   const plan = PLANS.find(p => p.id === activePlan?.planId);
   const todayDay = plan?.schedule[activePlan?.currentDayIdx ?? 0];
+  const customSession = getActiveCustomSession();
 
   const today = getDay(todayKey());
-  const hasAnyData = !!(today.exArr?.length || today.mealArr?.length || activePlan);
+  const hasAnyData = !!(today.exArr?.length || today.mealArr?.length || activePlan || customSession);
 
   const { score } = computeDisciplineScore(todayKey());
   const streak = calcStreak();
@@ -604,6 +606,19 @@ function DashboardScreen({
                     <p className="text-xs" style={{ color: C.mut }}>Recovery is part of the program</p>
                   </div>
                 </div>
+              ) : customSession ? (
+                <>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentSoft, color: C.accent }}>
+                      <Dumbbell size={18} />
+                    </div>
+                    <div>
+                      <p className="text-base font-semibold" style={{ color: C.pri }}>Custom Workout</p>
+                      <p className="text-xs" style={{ color: C.mut }}>{customSession.exercises.length} exercises · in progress</p>
+                    </div>
+                  </div>
+                  <Btn full onClick={onGoToWorkout}><Play size={14} /> Continue workout</Btn>
+                </>
               ) : (
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.mut }}>
@@ -883,8 +898,8 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
   const [cat, setCat] = useState<string>(Object.keys(EX)[0]);
   const cats = Object.keys(EX);
   const list = query.trim()
-    ? cats.flatMap(c => EX[c].x.filter(x => x.toLowerCase().includes(query.trim().toLowerCase())))
-    : EX[cat]?.x ?? [];
+    ? cats.flatMap(c => EX[c].x.filter(x => x.toLowerCase().includes(query.trim().toLowerCase())).map(x => ({ name: x, targets: EX[c].m })))
+    : (EX[cat]?.x ?? []).map(x => ({ name: x, targets: EX[cat].m }));
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
@@ -904,17 +919,18 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
             {cats.map(c => (
               <button key={c} onClick={() => setCat(c)}
                 className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
-                style={{ background: cat === c ? C.accentSoft : C.surface, borderColor: cat === c ? C.accent : C.border, color: cat === c ? C.accent : C.sec }}>
+                style={{ background: cat === c ? C.accentSoft : C.surface, borderColor: cat === c ? C.accent : C.border, color: cat === c ? C.accent : C.sec, whiteSpace: "nowrap" }}>
                 {EX[c].e} {c}
               </button>
             ))}
           </div>
         )}
         <div className="flex flex-col">
-          {list.map(name => (
+          {list.map(({ name, targets }) => (
             <div key={name} className="flex items-center gap-2 border-b" style={{ borderColor: C.border }}>
-              <button onClick={() => onPick(name)} className="flex-1 text-left py-3">
+              <button onClick={() => onPick(name)} className="flex-1 min-w-0 text-left py-3">
                 <p className="text-sm font-medium" style={{ color: C.pri }}>{name}</p>
+                <p className="text-xs mt-0.5 truncate" style={{ color: C.accent }}>Targets: {targets}</p>
               </button>
               <a href={ytURL(name)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
                 aria-label={`Watch ${name} tutorial on YouTube`}
@@ -1027,7 +1043,12 @@ function WorkoutScreen({
   const [selDay, setSelDay] = useState<PlanDay | null>(null);
   const [showActive, setShowActive] = useState(false);
   const [toast, setToast] = useState("");
-  const [customExercises, setCustomExercises] = useState<Exercise[] | null>(null);
+  // The custom session's exercise list is persisted (rj_active_custom) so it
+  // survives switching tabs. `showCustomActive` is local — it only controls
+  // whether we're looking at the full-screen logging view right now; exiting
+  // it does NOT clear the persisted session, so it can be resumed later.
+  const [customSession, setCustomSession] = useState<ActiveCustomSession | null>(() => getActiveCustomSession());
+  const [showCustomActive, setShowCustomActive] = useState(false);
 
   useEffect(() => { onConsumedInitialView?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1060,15 +1081,29 @@ function WorkoutScreen({
     else { onSetActivePlan({ ...activePlan, currentWeek: next.currentWeek, currentDayIdx: next.currentDayIdx }); flash("Day skipped."); }
   }
 
-  // Custom (non-plan) workout in progress
-  if (customExercises) {
+  function startCustom(exercises: Exercise[]) {
+    const session: ActiveCustomSession = { exercises, startedAt: customSession?.startedAt ?? new Date().toISOString() };
+    saveActiveCustomSession(session);
+    setCustomSession(session);
+    setShowCustomActive(true);
+    setView("overview");
+  }
+  function finishCustom() {
+    saveActiveCustomSession(null);
+    setCustomSession(null);
+    setShowCustomActive(false);
+    flash("Workout saved.");
+  }
+
+  // Custom (non-plan) workout — actively being logged right now
+  if (showCustomActive && customSession) {
     return (
       <ActiveSessionView
-        exercises={customExercises}
+        exercises={customSession.exercises}
         planName="Custom Workout"
-        dayLabel={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-        onComplete={() => { setCustomExercises(null); setView("overview"); flash("Workout saved."); }}
-        onExit={() => setCustomExercises(null)}
+        dayLabel={new Date(customSession.startedAt).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        onComplete={finishCustom}
+        onExit={() => setShowCustomActive(false)}
       />
     );
   }
@@ -1076,7 +1111,7 @@ function WorkoutScreen({
   if (view === "build") {
     return (
       <CustomBuilder
-        onStart={(exercises) => { setCustomExercises(exercises); setView("overview"); }}
+        onStart={startCustom}
         onCancel={() => setView("overview")}
       />
     );
@@ -1284,7 +1319,7 @@ function WorkoutScreen({
       )}
 
       <div className="flex flex-col gap-4 px-5 pb-8">
-        {!activePlan && !hasWorkoutHistory ? (
+        {!activePlan && !hasWorkoutHistory && !customSession ? (
           <EmptyState
             icon={<Dumbbell size={28} />}
             title="No active plan"
@@ -1332,6 +1367,29 @@ function WorkoutScreen({
                 <div className="flex gap-2">
                   <Btn full onClick={() => setView("plans")}>Browse plans</Btn>
                   <Btn full variant="secondary" onClick={() => setView("build")}>Build your own</Btn>
+                </div>
+              </Card>
+            )}
+
+            {customSession && (
+              <Card>
+                <div className="flex items-center justify-between mb-3">
+                  <SectionLabel>Custom workout in progress</SectionLabel>
+                </div>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: C.accentSoft, color: C.accent }}>
+                    <Dumbbell size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-base font-bold" style={{ color: C.pri }}>Custom Workout</p>
+                    <p className="text-xs" style={{ color: C.mut }}>{customSession.exercises.length} exercises · started {new Date(customSession.startedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Btn full onClick={() => setShowCustomActive(true)}><Play size={14} /> Continue workout</Btn>
+                  <Btn variant="secondary" onClick={() => { saveActiveCustomSession(null); setCustomSession(null); }}>
+                    Discard
+                  </Btn>
                 </div>
               </Card>
             )}

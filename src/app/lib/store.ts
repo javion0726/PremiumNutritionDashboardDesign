@@ -192,7 +192,7 @@ export function saveMeasurements(m: Measurement[]) { save('rj_meas', m) }
 
 // ─── backup / restore / clear (feature parity with the vanilla app) ──────────
 
-const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan'] as const
+const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom'] as const
 
 export function exportBackup(): string {
   const data: Record<string, unknown> = { _app: 'ascend', _schema: SCHEMA_VERSION, _exported: new Date().toISOString() }
@@ -278,3 +278,12 @@ export type ActivePlan = {
 
 export function getActivePlan(): ActivePlan | null { return load<ActivePlan | null>('rj_active_plan', null) }
 export function saveActivePlan(p: ActivePlan | null) { save('rj_active_plan', p) }
+
+// ─── active custom (non-plan) workout session ──────────────────────────────────
+// Distinct from ActivePlan: this is a one-off session built via the workout
+// builder. Persisted so switching tabs mid-workout doesn't strand progress —
+// without this, the builder's exercise list only lived in React state and
+// vanished the moment WorkoutScreen unmounted.
+export type ActiveCustomSession = { exercises: { name: string; sets: number; reps: string; weight?: string }[]; startedAt: string }
+export function getActiveCustomSession(): ActiveCustomSession | null { return load<ActiveCustomSession | null>('rj_active_custom', null) }
+export function saveActiveCustomSession(s: ActiveCustomSession | null) { save('rj_active_custom', s) }
