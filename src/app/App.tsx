@@ -32,9 +32,31 @@ import {
   recoveryScore, workoutStats,
 } from "./lib/engine";
 import { searchFood, type FoodResult } from "./lib/food";
+import { EX } from "./lib/exercises";
 
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
 runMigrations();
+
+function ytURL(name: string): string {
+  return "https://www.youtube.com/results?search_query=" + encodeURIComponent(name + " exercise tutorial form");
+}
+
+// Case-insensitive, tolerant lookup: plan/custom exercise names don't always
+// match the library's naming exactly (e.g. "Barbell Bench Press" vs
+// "Bench Press"), so this tries an exact match first, then a substring match
+// in either direction, before giving up.
+const EXERCISE_INDEX: { name: string; category: string; targets: string }[] =
+  Object.entries(EX).flatMap(([category, data]) =>
+    data.x.map(name => ({ name, category, targets: data.m }))
+  );
+
+function exerciseTargets(name: string): string | null {
+  const q = name.toLowerCase().trim();
+  const exact = EXERCISE_INDEX.find(e => e.name.toLowerCase() === q);
+  if (exact) return exact.targets;
+  const partial = EXERCISE_INDEX.find(e => q.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(q));
+  return partial?.targets ?? null;
+}
 
 // ─── EXACT COLOR TOKENS ──────────────────────────────────────────────────────
 // Background:    #F6F5F2  Surface/Card:   #FFFFFF  Surface-alt:   #EDECEA
@@ -74,7 +96,7 @@ const C = {
 } as const;
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
-type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active";
+type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build";
 type DisplayState = "populated" | "empty" | "loading" | "error";
 
 // ─── PRIMITIVE COMPONENTS ─────────────────────────────────────────────────────
@@ -187,8 +209,9 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`rounded-xl animate-pulse ${className}`} style={{ background: C.surfaceAlt }} />;
 }
 
-function EmptyState({ icon, title, body, action, onAction }: {
+function EmptyState({ icon, title, body, action, onAction, secondaryAction, onSecondaryAction }: {
   icon: React.ReactNode; title: string; body: string; action?: string; onAction?: () => void;
+  secondaryAction?: string; onSecondaryAction?: () => void;
 }) {
   return (
     <div className="flex flex-col items-center text-center py-16 px-8 gap-4">
@@ -200,6 +223,11 @@ function EmptyState({ icon, title, body, action, onAction }: {
         <p className="text-sm leading-relaxed" style={{ color: C.mut }}>{body}</p>
       </div>
       {action && <Btn onClick={onAction}>{action}</Btn>}
+      {secondaryAction && (
+        <button onClick={onSecondaryAction} className="text-sm font-semibold" style={{ color: C.accent }}>
+          {secondaryAction}
+        </button>
+      )}
     </div>
   );
 }
@@ -422,11 +450,12 @@ function Onboarding({ onComplete }: { onComplete: () => void }) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 function DashboardScreen({
-  activePlan, onGoToWorkout, onOpenProfile,
+  activePlan, onGoToWorkout, onOpenProfile, onBuildWorkout,
 }: {
   activePlan: ActivePlan | null;
   onGoToWorkout: () => void;
   onOpenProfile: () => void;
+  onBuildWorkout: () => void;
 }) {
   useAppData();
   const cfg = getConfig();
@@ -485,6 +514,8 @@ function DashboardScreen({
             body="Set up your first plan and start training to see your Discipline Score and daily summary here."
             action="Browse plans"
             onAction={onGoToWorkout}
+            secondaryAction="or build your own workout"
+            onSecondaryAction={onBuildWorkout}
           />
         ) : (
           <>
@@ -770,13 +801,22 @@ function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }
       {/* Current exercise */}
       <div className="flex-1 px-5 pb-8 flex flex-col gap-4">
         <Card>
-          <div className="flex items-start justify-between mb-1">
-            <h2 className="text-lg font-bold" style={{ color: C.pri }}>{currentEx.name}</h2>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-md" style={{ background: C.surfaceAlt, color: C.mut }}>
+          <div className="flex items-start justify-between mb-1 gap-3">
+            <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>{currentEx.name}</h2>
+            <a href={ytURL(currentEx.name)} target="_blank" rel="noopener noreferrer"
+              aria-label={`Watch ${currentEx.name} tutorial on YouTube`}
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "#FBEAEA", color: "#C0392B" }}>
+              <Play size={14} fill="#C0392B" />
+            </a>
+            <span className="text-xs font-mono px-2 py-0.5 rounded-md flex-shrink-0" style={{ background: C.surfaceAlt, color: C.mut }}>
               {currentEx.sets} sets
             </span>
           </div>
-          <p className="text-sm mb-4" style={{ color: C.mut }}>{currentEx.reps} reps{currentEx.weight ? ` · ${currentEx.weight}` : ""}</p>
+          <p className="text-sm mb-1" style={{ color: C.mut }}>{currentEx.reps} reps{currentEx.weight ? ` · ${currentEx.weight}` : ""}</p>
+          {exerciseTargets(currentEx.name) && (
+            <p className="text-xs mb-4" style={{ color: C.accent }}>Targets: {exerciseTargets(currentEx.name)}</p>
+          )}
           {currentEx.notes && (
             <p className="text-xs mb-4 px-3 py-2 rounded-xl" style={{ background: C.surfaceAlt, color: C.sec }}>{currentEx.notes}</p>
           )}
@@ -838,18 +878,158 @@ function ActiveSessionView({ exercises, planName, dayLabel, onComplete, onExit }
 
 // ─── NUTRITION ────────────────────────────────────────────────────────────────
 
+function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState<string>(Object.keys(EX)[0]);
+  const cats = Object.keys(EX);
+  const list = query.trim()
+    ? cats.flatMap(c => EX[c].x.filter(x => x.toLowerCase().includes(query.trim().toLowerCase())))
+    : EX[cat]?.x ?? [];
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
+        maxWidth: 430, maxHeight: "78vh", overflowY: "auto", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+      }}>
+        <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
+        <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
+        <input
+          autoFocus placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
+          className="w-full box-border px-4 py-3 rounded-xl text-sm outline-none border"
+          style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "Inter, sans-serif" }}
+        />
+        {!query.trim() && (
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+            {cats.map(c => (
+              <button key={c} onClick={() => setCat(c)}
+                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                style={{ background: cat === c ? C.accentSoft : C.surface, borderColor: cat === c ? C.accent : C.border, color: cat === c ? C.accent : C.sec }}>
+                {EX[c].e} {c}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-col">
+          {list.map(name => (
+            <div key={name} className="flex items-center gap-2 border-b" style={{ borderColor: C.border }}>
+              <button onClick={() => onPick(name)} className="flex-1 text-left py-3">
+                <p className="text-sm font-medium" style={{ color: C.pri }}>{name}</p>
+              </button>
+              <a href={ytURL(name)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                aria-label={`Watch ${name} tutorial on YouTube`}
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mr-1"
+                style={{ background: "#FBEAEA", color: "#C0392B" }}>
+                <Play size={12} fill="#C0392B" />
+              </a>
+            </div>
+          ))}
+          {!list.length && <p className="text-sm py-6 text-center" style={{ color: C.mut }}>No exercises match "{query}"</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[]) => void; onCancel: () => void }) {
+  const [built, setBuilt] = useState<Exercise[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+
+  function addEx(name: string) {
+    setBuilt(b => [...b, { name, sets: 3, reps: "10", weight: "" }]);
+    setShowPicker(false);
+  }
+  function updateEx(i: number, patch: Partial<Exercise>) {
+    setBuilt(b => b.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+  }
+  function removeEx(i: number) {
+    setBuilt(b => b.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+        <button onClick={onCancel} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+          <ChevronLeft size={18} />
+        </button>
+        <h2 className="text-lg font-bold" style={{ color: C.pri }}>Build a workout</h2>
+      </div>
+
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-8 flex-1">
+        {!built.length ? (
+          <EmptyState icon={<Dumbbell size={28} />} title="No exercises added" body="Search the exercise library and add movements one at a time to build your own session." action="Add exercise" onAction={() => setShowPicker(true)} />
+        ) : (
+          <>
+            {built.map((ex, i) => {
+              const targets = exerciseTargets(ex.name);
+              return (
+                <Card key={i}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>{ex.name}</p>
+                      {targets && <p className="text-xs mt-0.5" style={{ color: C.accent }}>Targets: {targets}</p>}
+                    </div>
+                    <a href={ytURL(ex.name)} target="_blank" rel="noopener noreferrer"
+                      aria-label={`Watch ${ex.name} tutorial`}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#FBEAEA", color: "#C0392B" }}>
+                      <Play size={12} fill="#C0392B" />
+                    </a>
+                    <button onClick={() => removeEx(i)} aria-label={`Remove ${ex.name}`}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ color: C.mut }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <span className="text-xs" style={{ color: C.mut }}>Sets</span>
+                      <input type="number" min={1} value={ex.sets} onChange={e => updateEx(i, { sets: parseInt(e.target.value) || 1 })}
+                        className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-xs" style={{ color: C.mut }}>Reps</span>
+                      <input value={ex.reps} onChange={e => updateEx(i, { reps: e.target.value })}
+                        className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-xs" style={{ color: C.mut }}>Weight</span>
+                      <input value={ex.weight ?? ""} placeholder="lbs" onChange={e => updateEx(i, { weight: e.target.value })}
+                        className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+            <Btn variant="secondary" full onClick={() => setShowPicker(true)}><Plus size={14} /> Add another exercise</Btn>
+            <div className="mt-2">
+              <Btn full size="lg" onClick={() => onStart(built)}><Play size={16} /> Start this workout</Btn>
+            </div>
+          </>
+        )}
+      </div>
+
+      {showPicker && <ExercisePicker onPick={addEx} onClose={() => setShowPicker(false)} />}
+    </div>
+  );
+}
+
 function WorkoutScreen({
-  activePlan, onSetActivePlan, onPlanChanged,
+  activePlan, onSetActivePlan, onPlanChanged, initialView, onConsumedInitialView,
 }: {
   activePlan: ActivePlan | null;
   onSetActivePlan: (p: ActivePlan | null) => void;
   onPlanChanged?: () => void;
+  initialView?: WorkoutView;
+  onConsumedInitialView?: () => void;
 }) {
-  const [view, setView] = useState<WorkoutView>("overview");
+  const [view, setView] = useState<WorkoutView>(() => initialView ?? "overview");
   const [selPlan, setSelPlan] = useState<WeeklyPlan | null>(null);
   const [selDay, setSelDay] = useState<PlanDay | null>(null);
   const [showActive, setShowActive] = useState(false);
   const [toast, setToast] = useState("");
+  const [customExercises, setCustomExercises] = useState<Exercise[] | null>(null);
+
+  useEffect(() => { onConsumedInitialView?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const plan = PLANS.find(p => p.id === activePlan?.planId);
   const todayDay = plan?.schedule[activePlan?.currentDayIdx ?? 0];
@@ -878,6 +1058,28 @@ function WorkoutScreen({
     const next = advancePlanDay(activePlan, plan.schedule.length, plan.totalWeeks);
     if (next.completed) { onSetActivePlan(null); flash(`${plan.name} complete.`); }
     else { onSetActivePlan({ ...activePlan, currentWeek: next.currentWeek, currentDayIdx: next.currentDayIdx }); flash("Day skipped."); }
+  }
+
+  // Custom (non-plan) workout in progress
+  if (customExercises) {
+    return (
+      <ActiveSessionView
+        exercises={customExercises}
+        planName="Custom Workout"
+        dayLabel={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        onComplete={() => { setCustomExercises(null); setView("overview"); flash("Workout saved."); }}
+        onExit={() => setCustomExercises(null)}
+      />
+    );
+  }
+
+  if (view === "build") {
+    return (
+      <CustomBuilder
+        onStart={(exercises) => { setCustomExercises(exercises); setView("overview"); }}
+        onCancel={() => setView("overview")}
+      />
+    );
   }
 
   if (showActive && todayDay && todayDay.exercises) {
@@ -913,20 +1115,30 @@ function WorkoutScreen({
               <SectionLabel>{selDay.exercises?.length} exercises</SectionLabel>
               <Badge label={selDay.type} color={C.accentSoft} textColor={C.accent} />
             </div>
-            {selDay.exercises?.map((ex, i) => (
-              <Card key={i}>
-                <div className="flex items-start gap-3">
-                  <span className="text-sm font-mono w-5 pt-0.5 flex-shrink-0" style={{ color: C.mut }}>{i + 1}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold" style={{ color: C.pri }}>{ex.name}</p>
-                    <p className="text-xs mt-0.5" style={{ color: C.mut }}>
-                      {ex.sets} × {ex.reps}{ex.weight ? ` · ${ex.weight}` : ""}
-                    </p>
-                    {ex.notes && <p className="text-xs mt-1.5 italic" style={{ color: C.mut }}>{ex.notes}</p>}
+            {selDay.exercises?.map((ex, i) => {
+              const targets = exerciseTargets(ex.name);
+              return (
+                <Card key={i}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-sm font-mono w-5 pt-0.5 flex-shrink-0" style={{ color: C.mut }}>{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>{ex.name}</p>
+                      <p className="text-xs mt-0.5" style={{ color: C.mut }}>
+                        {ex.sets} × {ex.reps}{ex.weight ? ` · ${ex.weight}` : ""}
+                      </p>
+                      {targets && <p className="text-xs mt-1" style={{ color: C.accent }}>Targets: {targets}</p>}
+                      {ex.notes && <p className="text-xs mt-1.5 italic" style={{ color: C.mut }}>{ex.notes}</p>}
+                    </div>
+                    <a href={ytURL(ex.name)} target="_blank" rel="noopener noreferrer"
+                      aria-label={`Watch ${ex.name} tutorial on YouTube`}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#FBEAEA", color: "#C0392B" }}>
+                      <Play size={14} fill="#C0392B" />
+                    </a>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
             <div className="mt-2">
               <Btn full size="lg" onClick={() => {
                 if (selPlan) onSetActivePlan({ planId: selPlan.id, currentWeek: 1, currentDayIdx: selPlan.schedule.indexOf(selDay), startDate: new Date().toISOString().split("T")[0] });
@@ -1079,6 +1291,8 @@ function WorkoutScreen({
             body="Choose a structured weekly plan or start a single session to begin training."
             action="Browse plans"
             onAction={() => setView("plans")}
+            secondaryAction="or build your own workout"
+            onSecondaryAction={() => setView("build")}
           />
         ) : (
           <>
@@ -1114,8 +1328,11 @@ function WorkoutScreen({
             ) : (
               <Card>
                 <SectionLabel>No active plan</SectionLabel>
-                <p className="text-sm mt-3 mb-4" style={{ color: C.mut }}>Choose a structured weekly plan to auto-populate your daily sessions.</p>
-                <Btn full onClick={() => setView("plans")}>Browse plans</Btn>
+                <p className="text-sm mt-3 mb-4" style={{ color: C.mut }}>Choose a structured weekly plan, or build a single custom session.</p>
+                <div className="flex gap-2">
+                  <Btn full onClick={() => setView("plans")}>Browse plans</Btn>
+                  <Btn full variant="secondary" onClick={() => setView("build")}>Build your own</Btn>
+                </div>
               </Card>
             )}
 
@@ -2041,10 +2258,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [showProfile, setShowProfile] = useState(false);
   const [activePlan, setActivePlanState] = useState<ActivePlan | null>(() => getActivePlan());
+  const [workoutInitialView, setWorkoutInitialView] = useState<WorkoutView | undefined>(undefined);
 
   function setActivePlan(p: ActivePlan | null) {
     saveActivePlan(p);
     setActivePlanState(p);
+  }
+  function goBuildWorkout() {
+    setWorkoutInitialView("build");
+    setActiveTab("workout");
   }
 
   if (showOnboarding) {
@@ -2066,12 +2288,15 @@ export default function App() {
               activePlan={activePlan}
               onGoToWorkout={() => setActiveTab("workout")}
               onOpenProfile={() => setShowProfile(true)}
+              onBuildWorkout={goBuildWorkout}
             />
           )}
           {activeTab === "workout" && (
             <WorkoutScreen
               activePlan={activePlan}
               onSetActivePlan={setActivePlan}
+              initialView={workoutInitialView}
+              onConsumedInitialView={() => setWorkoutInitialView(undefined)}
             />
           )}
           {activeTab === "nutrition" && <NutritionScreen />}
