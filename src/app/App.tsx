@@ -928,30 +928,36 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
     : (EX[cat]?.x ?? []).map(x => ({ name: x, targets: EX[cat].m }));
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
-      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
-        maxWidth: 430, maxHeight: "78dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
-        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col" style={{
+        maxWidth: 430, height: "85dvh", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, overflow: "hidden",
       }}>
-        <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
-        <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
-        <input
-          placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
-          className="w-full box-border px-4 py-3 rounded-xl text-sm outline-none border"
-          style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "Inter, sans-serif" }}
-        />
-        {!query.trim() && (
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-            {cats.map(c => (
-              <button key={c} onClick={() => setCat(c)}
-                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
-                style={{ background: cat === c ? C.accentSoft : C.surface, borderColor: cat === c ? C.accent : C.border, color: cat === c ? C.accent : C.sec, whiteSpace: "nowrap" }}>
-                {EX[c].e} {c}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex flex-col">
+        {/* Sticky header — drag handle, title, search, and category chips are always
+            visible; they never get pushed out of view by the scrollable list below. */}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-3" style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
+          <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
+          <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
+          <input
+            placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
+            className="w-full box-border px-4 py-3 rounded-xl text-sm outline-none border"
+            style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "Inter, sans-serif" }}
+          />
+          {!query.trim() && (
+            <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {cats.map(c => (
+                <button key={c} onClick={() => setCat(c)}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                  style={{ background: cat === c ? C.accentSoft : C.surface, borderColor: cat === c ? C.accent : C.border, color: cat === c ? C.accent : C.sec, whiteSpace: "nowrap" }}>
+                  {EX[c].e} {c}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Scrollable exercise list — only this region scrolls, so the header above stays put. */}
+        <div className="flex-1 overflow-y-auto px-5" style={{ WebkitOverflowScrolling: "touch", paddingBottom: 32 }}>
           {list.map(({ name, targets }) => (
             <div key={name} className="flex items-center gap-2 border-b" style={{ borderColor: C.border }}>
               <button onClick={() => onPick(name)} className="flex-1 min-w-0 text-left py-3">
