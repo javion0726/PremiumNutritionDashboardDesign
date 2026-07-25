@@ -936,7 +936,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
         <div className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border }} />
         <p className="text-lg font-bold" style={{ color: C.pri }}>Add exercise</p>
         <input
-          autoFocus placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
+          placeholder="Search exercises…" value={query} onChange={e => setQuery(e.target.value)}
           className="w-full box-border px-4 py-3 rounded-xl text-sm outline-none border"
           style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "Inter, sans-serif" }}
         />
@@ -1527,7 +1527,7 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
 
         {!manual ? (
           <>
-            <input autoFocus placeholder="Search foods (e.g. chicken breast)…" value={query} onChange={e => setQuery(e.target.value)} style={input} />
+            <input placeholder="Search foods (e.g. chicken breast)…" value={query} onChange={e => setQuery(e.target.value)} style={input} />
             {picked ? (
               <div className="rounded-2xl p-4 border" style={{ background: C.surface, borderColor: C.accent }}>
                 <p className="text-sm font-semibold" style={{ color: C.pri }}>{picked.name}{picked.brand ? ` · ${picked.brand}` : ""}</p>
