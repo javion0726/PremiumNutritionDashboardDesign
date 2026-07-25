@@ -23,6 +23,7 @@ import {
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, todayKey, type ExEntry,
   getMeasurements, saveMeasurements,
+  getGoals, saveGoals,
   exportBackup, clearAllData,
 } from "./lib/store";
 import { useAppData } from "./lib/useAppData";
@@ -508,7 +509,7 @@ function DashboardScreen({
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasAnyData ? (
           <EmptyState
             icon={<Dumbbell size={28} />}
@@ -840,7 +841,7 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, on
       {showPicker && <ExercisePicker onPick={addExerciseMidSession} onClose={() => setShowPicker(false)} />}
 
       {/* Current exercise */}
-      <div className="flex-1 px-5 pb-8 flex flex-col gap-4">
+      <div className="flex-1 px-5 pb-28 flex flex-col gap-4">
         <Card>
           <div className="flex items-start justify-between mb-1 gap-3">
             <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>{currentEx.name}</h2>
@@ -877,15 +878,15 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, on
                   value={log.weight} onChange={e => updateLog(sIdx, "weight", e.target.value)}
                   placeholder={currentEx.weight ?? "lbs"}
                   disabled={log.done}
-                  className="flex-1 px-3 py-2 rounded-xl text-sm font-mono outline-none border min-h-[44px]"
-                  style={{ background: log.done ? C.surfaceAlt : C.surface, borderColor: C.border, color: C.pri, opacity: log.done ? 0.6 : 1 }}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl text-sm font-mono outline-none border min-h-[44px]"
+                  style={{ background: log.done ? C.surfaceAlt : C.surface, borderColor: C.border, color: C.pri, opacity: log.done ? 0.6 : 1, width: 0 }}
                 />
                 <input
                   value={log.reps} onChange={e => updateLog(sIdx, "reps", e.target.value)}
                   placeholder="reps"
                   disabled={log.done}
-                  className="flex-1 px-3 py-2 rounded-xl text-sm font-mono outline-none border min-h-[44px]"
-                  style={{ background: log.done ? C.surfaceAlt : C.surface, borderColor: C.border, color: C.pri, opacity: log.done ? 0.6 : 1 }}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl text-sm font-mono outline-none border min-h-[44px]"
+                  style={{ background: log.done ? C.surfaceAlt : C.surface, borderColor: C.border, color: C.pri, opacity: log.done ? 0.6 : 1, width: 0 }}
                 />
                 <button onClick={() => !log.done && markDone(sIdx)}
                   className="w-10 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-all border"
@@ -1054,7 +1055,7 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
         <h2 className="text-lg font-bold" style={{ color: C.pri }}>Build a workout</h2>
       </div>
 
-      <div className="flex flex-col gap-3 px-5 pt-5 pb-8 flex-1">
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
         {!built.length ? (
           <EmptyState icon={<Dumbbell size={28} />} title="No exercises added" body="Search the exercise library and add movements one at a time to build your own session." action="Add exercise" onAction={() => setShowPicker(true)} />
         ) : (
@@ -1080,17 +1081,17 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
                     </button>
                   </div>
                   <div className="flex gap-2">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <span className="text-xs" style={{ color: C.mut }}>Sets</span>
                       <input type="number" min={1} value={ex.sets} onChange={e => updateEx(i, { sets: parseInt(e.target.value) || 1 })}
                         className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <span className="text-xs" style={{ color: C.mut }}>Reps</span>
                       <input value={ex.reps} onChange={e => updateEx(i, { reps: e.target.value })}
                         className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <span className="text-xs" style={{ color: C.mut }}>Weight</span>
                       <input value={ex.weight ?? ""} placeholder="lbs" onChange={e => updateEx(i, { weight: e.target.value })}
                         className="w-full box-border mt-1 px-3 py-2 rounded-lg text-sm outline-none border" style={{ background: C.surface, borderColor: C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
@@ -1234,7 +1235,7 @@ function WorkoutScreen({
         {selDay.type === "rest" ? (
           <EmptyState icon={<Zap size={24} />} title="Rest day" body="Recovery is where adaptation happens. Prioritize sleep, light movement, and good nutrition." />
         ) : (
-          <div className="flex flex-col gap-3 px-5 pt-5 pb-8">
+          <div className="flex flex-col gap-3 px-5 pt-5 pb-28">
             <div className="flex items-center justify-between mb-2">
               <SectionLabel>{selDay.exercises?.length} exercises</SectionLabel>
               <Badge label={selDay.type} color={C.accentSoft} textColor={C.accent} />
@@ -1289,7 +1290,7 @@ function WorkoutScreen({
           <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>{selPlan.name}</h2>
           <Badge label={selPlan.difficulty} color={`${diffColor[selPlan.difficulty]}18`} textColor={diffColor[selPlan.difficulty]} />
         </div>
-        <div className="flex flex-col gap-5 px-5 pt-5 pb-8">
+        <div className="flex flex-col gap-5 px-5 pt-5 pb-28">
           <p className="text-sm leading-relaxed" style={{ color: C.sec }}>{selPlan.description}</p>
           <div className="flex gap-3">
             <div className="flex-1 rounded-xl p-3 border" style={{ background: C.surface, borderColor: C.border }}>
@@ -1359,7 +1360,7 @@ function WorkoutScreen({
           </button>
           <h2 className="text-lg font-bold" style={{ color: C.pri }}>Weekly Plans</h2>
         </div>
-        <div className="flex flex-col gap-3 px-5 pt-5 pb-8">
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28">
           {PLANS.map(p => (
             <Card key={p.id} onClick={() => { setSelPlan(p); setView("plan-detail"); }}>
               <div className="flex items-start justify-between mb-2">
@@ -1407,7 +1408,7 @@ function WorkoutScreen({
         </div>
       )}
 
-      <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex flex-col gap-4 px-5 pb-28">
         {!activePlan && !hasWorkoutHistory && !customSession ? (
           <EmptyState
             icon={<Dumbbell size={28} />}
@@ -1689,7 +1690,7 @@ function NutritionScreen() {
         </button>
       </div>
 
-      <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasAnyData ? (
           <EmptyState icon={<Utensils size={28} />} title="No meals logged" body="Start tracking your food to see calorie totals, macro breakdown, and daily insights." action="Log first meal" onAction={() => setSheetOpen(true)} />
         ) : (
@@ -1857,7 +1858,7 @@ function ProgressScreen() {
         <h1 className="text-2xl font-bold" style={{ color: C.pri }}>Progress</h1>
       </div>
 
-      <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasData ? (
           <EmptyState icon={<TrendingUp size={28} />} title="No progress data yet" body="Log your weight and workouts consistently to see trends and analytics here." />
         ) : (
@@ -2102,7 +2103,7 @@ function GoalsScreen() {
         </button>
       </div>
 
-      <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex flex-col gap-4 px-5 pb-28">
         {!goals.length ? (
           <EmptyState icon={<Target size={28} />} title="No goals set" body="Define your fitness goals with targets and deadlines to track progress over time." action="Add first goal" onAction={() => setShowAdd(true)} />
         ) : (
@@ -2191,10 +2192,168 @@ function GoalsScreen() {
 
 // ─── PROFILE / SETTINGS ───────────────────────────────────────────────────────
 
+const ACTIVITY_LEVELS = [
+  { label: "Sedentary", sub: "Little to no exercise", mult: 1.2 },
+  { label: "Light", sub: "1–3 days/week", mult: 1.375 },
+  { label: "Moderate", sub: "3–5 days/week", mult: 1.55 },
+  { label: "Very Active", sub: "6–7 days/week", mult: 1.725 },
+  { label: "Athlete", sub: "Physical job + training", mult: 1.9 },
+];
+const GOAL_CODES = [
+  { code: "lose_fast" as const, label: "Lose weight (fast)" },
+  { code: "lose" as const, label: "Lose weight" },
+  { code: "lose_slow" as const, label: "Lose weight (slow)" },
+  { code: "maintain" as const, label: "Maintain" },
+  { code: "recomp" as const, label: "Recomp (lose fat, build muscle)" },
+  { code: "gain_slow" as const, label: "Build muscle (slow)" },
+  { code: "gain" as const, label: "Build muscle" },
+];
+
+function CalculatorSheet({ onClose }: { onClose: () => void }) {
+  const cfg = getConfig();
+  const goals = getGoals();
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+  useLockBodyScroll();
+
+  const [sex, setSex] = useState<"male" | "female">("male");
+  const [age, setAge] = useState("30");
+  const [heightCm, setHeightCm] = useState(String(cfg.heightCm ?? 178));
+  const [weight, setWeight] = useState("");
+  const [goalWeight, setGoalWeight] = useState(String(goals.goalWeight ?? ""));
+  const [activityIdx, setActivityIdx] = useState(2);
+  const [goalCode, setGoalCode] = useState<typeof GOAL_CODES[number]["code"]>(goals.goalCode as never ?? "lose");
+  const [result, setResult] = useState<ReturnType<typeof calcTargets> | null>(null);
+
+  function compute() {
+    const w = parseFloat(weight);
+    const gw = parseFloat(goalWeight) || w;
+    const h = parseFloat(heightCm);
+    const a = parseInt(age);
+    if (!w || !h || !a) return;
+    const r = calcTargets({
+      sex, age: a, heightCm: h, weightLbs: w, goalWeightLbs: gw,
+      activity: ACTIVITY_LEVELS[activityIdx].mult, goalCode,
+    });
+    setResult(r);
+  }
+
+  function save() {
+    if (!result) return;
+    const w = parseFloat(weight);
+    const gw = parseFloat(goalWeight) || w;
+    saveGoals({
+      results: { calories: result.calories, protein: result.protein, carbs: result.carbs, fats: result.fats },
+      goalWeight: gw, startWeight: w, goalCode,
+    });
+    saveConfig({ activity: ACTIVITY_LEVELS[activityIdx].mult, activityLabel: ACTIVITY_LEVELS[activityIdx].label, heightCm: parseFloat(heightCm) });
+    onClose();
+  }
+
+  const input: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", background: C.surface, border: `1px solid ${C.border}`,
+    borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
+  };
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
+        maxWidth: 430, maxHeight: "88dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
+      }}>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>Calorie & Macro Calculator</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-xs" style={{ color: C.mut }}>
+          Uses the Mifflin-St Jeor formula to personalize your daily calorie and macro targets across the app.
+        </p>
+
+        <div className="flex gap-2">
+          <button onClick={() => setSex("male")} className="flex-1 py-3 rounded-xl text-sm font-semibold border-2" style={{ border: `2px solid ${sex === "male" ? C.accent : C.border}`, background: sex === "male" ? C.accentSoft : C.surface, color: sex === "male" ? C.accent : C.sec }}>Male</button>
+          <button onClick={() => setSex("female")} className="flex-1 py-3 rounded-xl text-sm font-semibold border-2" style={{ border: `2px solid ${sex === "female" ? C.accent : C.border}`, background: sex === "female" ? C.accentSoft : C.surface, color: sex === "female" ? C.accent : C.sec }}>Female</button>
+        </div>
+
+        <div className="flex gap-2">
+          <Input label="Age" value={age} onChange={setAge} placeholder="30" type="number" />
+          <Input label="Height (cm)" value={heightCm} onChange={setHeightCm} placeholder="178" type="number" />
+        </div>
+        <div className="flex gap-2">
+          <Input label={`Current weight (${cfg.weightUnit})`} value={weight} onChange={setWeight} placeholder="190" type="number" />
+          <Input label={`Goal weight (${cfg.weightUnit})`} value={goalWeight} onChange={setGoalWeight} placeholder="180" type="number" />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.mut }}>Activity level</span>
+          <div className="flex flex-col gap-1.5">
+            {ACTIVITY_LEVELS.map((a, i) => (
+              <button key={a.label} onClick={() => setActivityIdx(i)}
+                className="flex items-center justify-between px-3 py-2.5 rounded-xl border text-left"
+                style={{ background: activityIdx === i ? C.accentSoft : C.surface, borderColor: activityIdx === i ? C.accent : C.border }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: activityIdx === i ? C.accent : C.pri }}>{a.label}</p>
+                  <p className="text-xs" style={{ color: C.mut }}>{a.sub}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.mut }}>Goal</span>
+          <div className="flex gap-2 flex-wrap">
+            {GOAL_CODES.map(g => (
+              <button key={g.code} onClick={() => setGoalCode(g.code)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                style={{ background: goalCode === g.code ? C.accentSoft : C.surface, borderColor: goalCode === g.code ? C.accent : C.border, color: goalCode === g.code ? C.accent : C.sec }}>
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Btn full onClick={compute}>Calculate</Btn>
+
+        {result && (
+          <div className="rounded-2xl p-4 border" style={{ background: C.accentSoft, borderColor: C.accent }}>
+            <p className="text-xs font-semibold mb-2" style={{ color: C.accent }}>Your personalized targets</p>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Calories", val: `${result.calories.toLocaleString()} kcal` },
+                { label: "Protein", val: `${result.protein}g` },
+                { label: "Carbs", val: `${result.carbs}g` },
+                { label: "Fat", val: `${result.fats}g` },
+              ].map(r => (
+                <div key={r.label}>
+                  <p className="text-xs" style={{ color: C.mut }}>{r.label}</p>
+                  <p className="text-base font-bold font-mono" style={{ color: C.pri }}>{r.val}</p>
+                </div>
+              ))}
+            </div>
+            {result.floored && (
+              <p className="text-xs mt-2" style={{ color: C.warn }}>
+                Calculated deficit was too aggressive — floored to a safe minimum.
+              </p>
+            )}
+            <div className="mt-3">
+              <Btn full onClick={save}>Save as my targets</Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ onClose }: { onClose: () => void }) {
   useAppData();
   const cfg = getConfig();
   const streak = calcStreak();
+  const goals = getGoals();
+  const [showCalc, setShowCalc] = useState(false);
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -2332,6 +2491,16 @@ function ProfileScreen({ onClose }: { onClose: () => void }) {
           <div>
             <SectionLabel>App preferences</SectionLabel>
             <div className="mt-3 rounded-2xl border overflow-hidden" style={{ borderColor: C.border }}>
+              <button onClick={() => setShowCalc(true)} className="w-full flex items-center justify-between px-4 py-3" style={{ minHeight: 48, background: C.surface }}>
+                <div className="text-left">
+                  <span className="text-sm block" style={{ color: C.pri }}>Calorie & Macro Calculator</span>
+                  <span className="text-xs" style={{ color: C.mut }}>
+                    {goals.results ? `${goals.results.calories.toLocaleString()} kcal · ${goals.results.protein}g protein — personalized` : "Not calculated — using default targets"}
+                  </span>
+                </div>
+                <ChevronRight size={16} style={{ color: C.mut }} />
+              </button>
+              <Divider />
               <button onClick={editRestTimer} className="w-full flex items-center justify-between px-4 py-3" style={{ minHeight: 48 }}>
                 <span className="text-sm" style={{ color: C.pri }}>Default rest timer</span>
                 <span className="text-xs font-mono" style={{ color: C.mut }}>{cfg.restTimerSeconds ?? 90}s</span>
@@ -2367,6 +2536,8 @@ function ProfileScreen({ onClose }: { onClose: () => void }) {
           </p>
         </div>
       </div>
+
+      {showCalc && <CalculatorSheet onClose={() => setShowCalc(false)} />}
     </div>
   );
 }
