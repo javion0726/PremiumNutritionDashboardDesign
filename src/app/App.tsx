@@ -928,7 +928,7 @@ function ExercisePicker({ onPick, onClose }: { onPick: (name: string) => void; o
     : (EX[cat]?.x ?? []).map(x => ({ name: x, targets: EX[cat].m }));
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
         maxWidth: 430, maxHeight: "78dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
@@ -1508,7 +1508,7 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
         maxWidth: 430, maxHeight: "80dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
@@ -1936,7 +1936,7 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
         maxWidth: 430, maxHeight: "85dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg,
         borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
