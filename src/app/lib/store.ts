@@ -47,7 +47,7 @@ export type Config = {
   memberSince?: string       // ISO date, stamped on first onboarding completion
 }
 
-export type GoalResults = { calories: number; protein: number; carbs: number; fats: number }
+export type GoalResults = { calories: number; protein: number; carbs: number; fats: number; tdee?: number }
 export type Goals = {
   results?: GoalResults
   goalWeight?: number

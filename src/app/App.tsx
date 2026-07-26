@@ -491,6 +491,25 @@ function DashboardScreen({
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  // Today's insight — same "compute one real thing, don't fabricate" approach
+  // used on the Nutrition screen. Priority order: protein gap, streak
+  // momentum, discipline trend, then a plain nudge to log something.
+  const proteinGap = Math.max(0, targets.protein - Math.round(totals.prot));
+  let todayInsight: string;
+  if (!hasAnyData) {
+    todayInsight = "Log a workout or meal to see your first insight here.";
+  } else if (totals.prot > 0 && proteinGap > 10) {
+    todayInsight = `You're ${proteinGap}g below your protein target today. A protein-rich snack would close most of that gap.`;
+  } else if (streak >= 3) {
+    todayInsight = `${streak}-day streak. Consistency compounds — the habit is doing more than any single workout.`;
+  } else if (scoreDelta > 5) {
+    todayInsight = `Discipline score is up ${scoreDelta} points from yesterday. Whatever you changed, it's working.`;
+  } else if (workoutsThisWeek === 0) {
+    todayInsight = "No workouts logged this week yet. One session today keeps the week from starting behind.";
+  } else {
+    todayInsight = "Steady day. Keep logging — patterns become visible after a few more days of data.";
+  }
+
   return (
     <div className="flex flex-col gap-0">
       {/* Header */}
@@ -677,6 +696,12 @@ function DashboardScreen({
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* Today's insight — rule-based, computed from real data, not fabricated */}
+            <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
+              <p className="text-sm" style={{ color: C.sec }}>{todayInsight}</p>
             </div>
           </>
         )}
@@ -2267,7 +2292,7 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
     const wRaw = parseFloat(weight);
     const gwRaw = parseFloat(goalWeight) || wRaw;
     saveGoals({
-      results: { calories: result.calories, protein: result.protein, carbs: result.carbs, fats: result.fats },
+      results: { calories: result.calories, protein: result.protein, carbs: result.carbs, fats: result.fats, tdee: result.tdee },
       goalWeight: gwRaw, startWeight: wRaw, goalCode,
     });
     saveConfig({ activity: ACTIVITY_LEVELS[activityIdx].mult, activityLabel: ACTIVITY_LEVELS[activityIdx].label, heightCm: resolvedHeightCm() });
@@ -2354,6 +2379,13 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
             <p className="text-xs font-semibold mb-2" style={{ color: C.accent }}>
               Your personalized targets · {result.formula === "katch-mcardle" ? "Katch-McArdle" : "Mifflin-St Jeor"}
             </p>
+            <div className="flex items-center justify-between pb-3 mb-3" style={{ borderBottom: `1px solid ${C.accent}30` }}>
+              <div>
+                <p className="text-xs" style={{ color: C.mut }}>Maintenance (TDEE)</p>
+                <p className="text-sm" style={{ color: C.mut }}>Calories to stay at your current weight</p>
+              </div>
+              <p className="text-lg font-bold font-mono flex-shrink-0" style={{ color: C.pri }}>{result.tdee.toLocaleString()}</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: "Calories", val: `${result.calories.toLocaleString()} kcal` },
