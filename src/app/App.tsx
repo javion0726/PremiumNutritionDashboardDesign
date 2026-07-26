@@ -15,7 +15,7 @@ import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
   BarChart, Bar,
 } from "recharts";
-import { PLANS, type WeeklyPlan, type PlanDay, type Exercise } from "./lib/plans";
+import { PLANS, type WeeklyPlan, type PlanDay, type Exercise, type Block } from "./lib/plans";
 import {
   getConfig, saveConfig, isOnboarded, markOnboarded, runMigrations,
   getActivePlan, saveActivePlan, type ActivePlan,
@@ -23,7 +23,8 @@ import {
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, todayKey, type ExEntry,
   getMeasurements, saveMeasurements,
-  getGoals, saveGoals, getGoalsList, syncCalculatorWeightGoal,
+  getGoals, saveGoals, syncCalculatorWeightGoal,
+  getSavedPlanIds, isPlanSaved, toggleSavedPlan,
   exportBackup, clearAllData,
 } from "./lib/store";
 import { useAppData } from "./lib/useAppData";
@@ -31,7 +32,7 @@ import {
   calcStreak, calcLongestStreak, mealTotals, getTargets, calcTargets,
   computeDisciplineScore, disciplineAverages, weekActivity, workoutVolume,
   bestSets, strengthHistory, consistencyGrid, advancePlanDay, resolveGoalCurrent,
-  recoveryScore, workoutStats,
+  recoveryScore, workoutStats, getBlockForWeek, getWeekInBlock, progressedWeight,
 } from "./lib/engine";
 import { searchFood, type FoodResult } from "./lib/food";
 import { EX } from "./lib/exercises";
@@ -462,7 +463,8 @@ function DashboardScreen({
   useAppData();
   const cfg = getConfig();
   const plan = PLANS.find(p => p.id === activePlan?.planId);
-  const todayDay = plan?.schedule[activePlan?.currentDayIdx ?? 0];
+  const currentBlock = plan && activePlan ? getBlockForWeek(plan.blocks, activePlan.currentWeek) : undefined;
+  const todayDay = currentBlock?.schedule[activePlan?.currentDayIdx ?? 0];
   const customSession = getActiveCustomSession();
 
   const today = getDay(todayKey());
@@ -712,8 +714,8 @@ function DashboardScreen({
 
 // ─── WORKOUT ─────────────────────────────────────────────────────────────────
 
-function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, onComplete, onExit, allowAddExercise, onExercisesChange }: {
-  exercises: Exercise[]; planName: string; dayLabel: string;
+function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, weekLabel, onComplete, onExit, allowAddExercise, onExercisesChange }: {
+  exercises: Exercise[]; planName: string; dayLabel: string; weekLabel?: string;
   onComplete: () => void; onExit: () => void;
   allowAddExercise?: boolean;
   onExercisesChange?: (exercises: Exercise[]) => void;
@@ -801,7 +803,7 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, on
           <X size={18} />
         </button>
         <div className="text-center">
-          <p className="text-xs font-mono" style={{ color: C.mut }}>{planName}</p>
+          <p className="text-xs font-mono" style={{ color: C.mut }}>{planName}{weekLabel ? ` · ${weekLabel}` : ""}</p>
           <p className="text-sm font-semibold" style={{ color: C.pri }}>{dayLabel}</p>
         </div>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center">
@@ -1147,9 +1149,23 @@ function WorkoutScreen({
   initialView?: WorkoutView;
   onConsumedInitialView?: () => void;
 }) {
+  useAppData();
   const [view, setView] = useState<WorkoutView>(() => initialView ?? "overview");
   const [selPlan, setSelPlan] = useState<WeeklyPlan | null>(null);
   const [selDay, setSelDay] = useState<PlanDay | null>(null);
+  const [selBlockIdx, setSelBlockIdx] = useState(0);
+  const [planFilter, setPlanFilter] = useState<"all" | "saved">("all");
+
+  function openPlanDetail(p: WeeklyPlan) {
+    setSelPlan(p);
+    if (activePlan?.planId === p.id) {
+      const idx = p.blocks.findIndex(b => activePlan.currentWeek >= b.weeks[0] && activePlan.currentWeek <= b.weeks[1]);
+      setSelBlockIdx(idx >= 0 ? idx : 0);
+    } else {
+      setSelBlockIdx(0);
+    }
+    setView("plan-detail");
+  }
   const [showActive, setShowActive] = useState(false);
   const [toast, setToast] = useState("");
   // The custom session's exercise list is persisted (rj_active_custom) so it
@@ -1162,7 +1178,8 @@ function WorkoutScreen({
   useEffect(() => { onConsumedInitialView?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const plan = PLANS.find(p => p.id === activePlan?.planId);
-  const todayDay = plan?.schedule[activePlan?.currentDayIdx ?? 0];
+  const currentBlock = plan && activePlan ? getBlockForWeek(plan.blocks, activePlan.currentWeek) : undefined;
+  const todayDay = currentBlock?.schedule[activePlan?.currentDayIdx ?? 0];
 
   function flash(msg: string) {
     setToast(msg);
@@ -1172,7 +1189,7 @@ function WorkoutScreen({
   function finishAndAdvance() {
     setShowActive(false);
     if (!activePlan || !plan) return;
-    const next = advancePlanDay(activePlan, plan.schedule.length, plan.totalWeeks);
+    const next = advancePlanDay(activePlan, (currentBlock?.schedule.length ?? 7), plan.totalWeeks);
     if (next.completed) {
       onSetActivePlan(null);
       flash(`${plan.name} complete — nice work. 🎉`);
@@ -1185,7 +1202,7 @@ function WorkoutScreen({
 
   function skipDay() {
     if (!activePlan || !plan) return;
-    const next = advancePlanDay(activePlan, plan.schedule.length, plan.totalWeeks);
+    const next = advancePlanDay(activePlan, (currentBlock?.schedule.length ?? 7), plan.totalWeeks);
     if (next.completed) { onSetActivePlan(null); flash(`${plan.name} complete.`); }
     else { onSetActivePlan({ ...activePlan, currentWeek: next.currentWeek, currentDayIdx: next.currentDayIdx }); flash("Day skipped."); }
   }
@@ -1232,12 +1249,18 @@ function WorkoutScreen({
     );
   }
 
-  if (showActive && todayDay && todayDay.exercises) {
+  if (showActive && todayDay && todayDay.exercises && activePlan) {
+    const block = getBlockForWeek(plan!.blocks, activePlan.currentWeek);
+    const weekInBlock = getWeekInBlock(plan!.blocks, activePlan.currentWeek);
+    const progressedExercises = todayDay.exercises.map(ex => ({
+      ...ex, weight: progressedWeight(ex.weight, ex.name, weekInBlock),
+    }));
     return (
       <ActiveSessionView
-        exercises={todayDay.exercises}
+        exercises={progressedExercises}
         planName={plan?.name ?? ""}
         dayLabel={todayDay.label}
+        weekLabel={`${block.label} · Week ${activePlan.currentWeek} of ${plan!.totalWeeks}`}
         onComplete={finishAndAdvance}
         onExit={() => setShowActive(false)}
       />
@@ -1291,7 +1314,11 @@ function WorkoutScreen({
             })}
             <div className="mt-2">
               <Btn full size="lg" onClick={() => {
-                if (selPlan) onSetActivePlan({ planId: selPlan.id, currentWeek: 1, currentDayIdx: selPlan.schedule.indexOf(selDay), startDate: new Date().toISOString().split("T")[0] });
+                if (selPlan) {
+                  const block = selPlan.blocks[selBlockIdx] ?? selPlan.blocks[0];
+                  const dayIdx = block.schedule.indexOf(selDay);
+                  onSetActivePlan({ planId: selPlan.id, currentWeek: block.weeks[0], currentDayIdx: dayIdx >= 0 ? dayIdx : 0, startDate: new Date().toISOString().split("T")[0] });
+                }
                 setShowActive(true);
               }}>
                 <Play size={16} /> Start this session
@@ -1306,6 +1333,8 @@ function WorkoutScreen({
   if (view === "plan-detail" && selPlan) {
     const diffColor: Record<string, string> = { Beginner: C.ok, Intermediate: C.warn, Advanced: C.err };
     const typeColor: Record<string, string> = { strength: C.accent, conditioning: C.warn, rest: C.mut, mobility: C.ok, power: "#6B5EA8" };
+    const block = selPlan.blocks[selBlockIdx] ?? selPlan.blocks[0];
+    const saved = isPlanSaved(selPlan.id);
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
@@ -1313,6 +1342,11 @@ function WorkoutScreen({
             <ChevronLeft size={18} />
           </button>
           <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>{selPlan.name}</h2>
+          <button onClick={() => toggleSavedPlan(selPlan.id)} aria-label={saved ? "Remove from saved" : "Save plan"}
+            className="w-9 h-9 rounded-xl border flex items-center justify-center mr-1"
+            style={{ borderColor: saved ? C.accent : C.border, background: saved ? C.accentSoft : C.surface, color: saved ? C.accent : C.sec }}>
+            <Target size={15} />
+          </button>
           <Badge label={selPlan.difficulty} color={`${diffColor[selPlan.difficulty]}18`} textColor={diffColor[selPlan.difficulty]} />
         </div>
         <div className="flex flex-col gap-5 px-5 pt-5 pb-28">
@@ -1328,12 +1362,35 @@ function WorkoutScreen({
             </div>
           </div>
 
+          {/* Block / phase selector */}
+          <div>
+            <SectionLabel>Program phases</SectionLabel>
+            <div className="flex gap-2 mt-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {selPlan.blocks.map((b, i) => {
+                const isCurrent = activePlan?.planId === selPlan.id && activePlan.currentWeek >= b.weeks[0] && activePlan.currentWeek <= b.weeks[1];
+                return (
+                  <button key={b.label} onClick={() => setSelBlockIdx(i)}
+                    className="flex-shrink-0 px-3 py-2 rounded-xl text-left border"
+                    style={{ background: i === selBlockIdx ? C.accentSoft : C.surface, borderColor: i === selBlockIdx ? C.accent : C.border, minWidth: 120 }}>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-semibold" style={{ color: i === selBlockIdx ? C.accent : C.pri }}>{b.label}</p>
+                      {isCurrent && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: C.accent }} />}
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: C.mut }}>Weeks {b.weeks[0]}–{b.weeks[1]}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.mut }}>{block.focus}</p>
+          </div>
+
           <div>
             <SectionLabel>Weekly schedule</SectionLabel>
             <div className="grid grid-cols-7 gap-1 mt-3">
-              {selPlan.schedule.map((d, i) => {
+              {block.schedule.map((d, i) => {
                 const isRest = d.type === "rest";
-                const isToday = activePlan?.planId === selPlan.id && activePlan?.currentDayIdx === i;
+                const isToday = activePlan?.planId === selPlan.id && activePlan?.currentDayIdx === i
+                  && activePlan.currentWeek >= block.weeks[0] && activePlan.currentWeek <= block.weeks[1];
                 return (
                   <button key={i} onClick={() => { setSelDay(d); setView("day-detail"); }}
                     className="flex flex-col items-center gap-1 rounded-xl py-3 px-1 transition-all active:scale-95 border"
@@ -1377,36 +1434,62 @@ function WorkoutScreen({
 
   if (view === "plans") {
     const diffColor: Record<string, string> = { Beginner: C.ok, Intermediate: C.warn, Advanced: C.err };
+    const savedIds = getSavedPlanIds();
+    const visiblePlans = planFilter === "saved" ? PLANS.filter(p => savedIds.includes(p.id)) : PLANS;
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
           <button onClick={() => setView("overview")} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
             <ChevronLeft size={18} />
           </button>
-          <h2 className="text-lg font-bold" style={{ color: C.pri }}>Weekly Plans</h2>
+          <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>Weekly Plans</h2>
         </div>
-        <div className="flex flex-col gap-3 px-5 pt-5 pb-28">
-          {PLANS.map(p => (
-            <Card key={p.id} onClick={() => { setSelPlan(p); setView("plan-detail"); }}>
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-base font-bold" style={{ color: C.pri }}>{p.name}</h3>
-                    {activePlan?.planId === p.id && <Badge label="Active" />}
+        <div className="px-5 pt-4">
+          <div className="flex gap-2 p-1 rounded-xl" style={{ background: C.surfaceAlt }}>
+            {(["all", "saved"] as const).map(f => (
+              <button key={f} onClick={() => setPlanFilter(f)}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold capitalize"
+                style={{ background: planFilter === f ? C.surface : "transparent", color: planFilter === f ? C.pri : C.mut }}>
+                {f === "saved" ? `Saved (${savedIds.length})` : "All plans"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 px-5 pt-4 pb-28">
+          {!visiblePlans.length ? (
+            <EmptyState icon={<Target size={28} />} title="No saved plans yet" body="Tap the bookmark icon on any plan to save it here for quick access." />
+          ) : visiblePlans.map(p => {
+            const saved = savedIds.includes(p.id);
+            return (
+              <Card key={p.id} onClick={() => openPlanDetail(p)}>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-base font-bold" style={{ color: C.pri }}>{p.name}</h3>
+                      {activePlan?.planId === p.id && <Badge label="Active" />}
+                    </div>
+                    <p className="text-xs" style={{ color: C.mut }}>{p.tagline}</p>
                   </div>
-                  <p className="text-xs" style={{ color: C.mut }}>{p.tagline}</p>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); toggleSavedPlan(p.id); }}
+                      aria-label={saved ? "Remove from saved" : "Save plan"}
+                      className="w-8 h-8 rounded-lg border flex items-center justify-center"
+                      style={{ borderColor: saved ? C.accent : C.border, background: saved ? C.accentSoft : C.surface, color: saved ? C.accent : C.mut }}>
+                      <Target size={13} />
+                    </button>
+                    <Badge label={p.difficulty} color={`${diffColor[p.difficulty]}15`} textColor={diffColor[p.difficulty]} />
+                  </div>
                 </div>
-                <Badge label={p.difficulty} color={`${diffColor[p.difficulty]}15`} textColor={diffColor[p.difficulty]} />
-              </div>
-              <p className="text-sm mb-3 leading-relaxed" style={{ color: C.sec }}>{p.description.split(".")[0]}.</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono" style={{ color: C.mut }}>{p.duration}</span>
-                <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.accent }}>
-                  View plan <ChevronRight size={14} />
+                <p className="text-sm mb-3 leading-relaxed" style={{ color: C.sec }}>{p.description.split(".")[0]}.</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono" style={{ color: C.mut }}>{p.duration}</span>
+                  <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.accent }}>
+                    View plan <ChevronRight size={14} />
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       </div>
     );
@@ -1465,13 +1548,13 @@ function WorkoutScreen({
                   {todayDay.type !== "rest" && todayDay.exercises && (
                     <Btn full onClick={() => setShowActive(true)}><Play size={14} /> Start session</Btn>
                   )}
-                  <Btn variant="secondary" onClick={() => { setSelPlan(plan); setView("plan-detail"); }}>
+                  <Btn variant="secondary" onClick={() => plan && openPlanDetail(plan)}>
                     Full plan
                   </Btn>
                 </div>
                 <div className="flex gap-3 mt-3 pt-3 border-t" style={{ borderColor: C.border }}>
                   <button className="text-xs" style={{ color: C.mut }} onClick={skipDay}>Skip day</button>
-                  <button className="text-xs" style={{ color: C.mut }} onClick={() => { setSelPlan(plan); setView("plan-detail"); }}>Reschedule</button>
+                  <button className="text-xs" style={{ color: C.mut }} onClick={() => plan && openPlanDetail(plan)}>Reschedule</button>
                   <button className="text-xs ml-auto" style={{ color: C.err }} onClick={() => onSetActivePlan(null)}>Exit plan</button>
                 </div>
               </Card>

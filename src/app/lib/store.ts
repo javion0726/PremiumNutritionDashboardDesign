@@ -192,7 +192,7 @@ export function saveMeasurements(m: Measurement[]) { save('rj_meas', m) }
 
 // ─── backup / restore / clear (feature parity with the vanilla app) ──────────
 
-const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom'] as const
+const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom', 'rj_saved_plans'] as const
 
 export function exportBackup(): string {
   const data: Record<string, unknown> = { _app: 'ascend', _schema: SCHEMA_VERSION, _exported: new Date().toISOString() }
@@ -308,3 +308,16 @@ export function saveActivePlan(p: ActivePlan | null) { save('rj_active_plan', p)
 export type ActiveCustomSession = { exercises: { name: string; sets: number; reps: string; weight?: string }[]; startedAt: string }
 export function getActiveCustomSession(): ActiveCustomSession | null { return load<ActiveCustomSession | null>('rj_active_custom', null) }
 export function saveActiveCustomSession(s: ActiveCustomSession | null) { save('rj_active_custom', s) }
+
+// ─── saved plans (bookmarks) ──────────────────────────────────────────────────
+// Lets a user bookmark any plan they find for quick access later, independent
+// of whether they've actually started it.
+
+export function getSavedPlanIds(): string[] { return load<string[]>('rj_saved_plans', []) }
+export function isPlanSaved(planId: string): boolean { return getSavedPlanIds().includes(planId) }
+export function toggleSavedPlan(planId: string): boolean {
+  const ids = getSavedPlanIds()
+  const isSaved = ids.includes(planId)
+  save('rj_saved_plans', isSaved ? ids.filter(id => id !== planId) : [...ids, planId])
+  return !isSaved
+}

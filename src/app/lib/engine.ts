@@ -357,6 +357,39 @@ export function advancePlanDay(current: { currentWeek: number; currentDayIdx: nu
   return { currentWeek, currentDayIdx, completed: currentWeek > totalWeeks }
 }
 
+// ─── block periodization ──────────────────────────────────────────────────────
+// A plan's `blocks` array covers its whole duration in non-overlapping week
+// ranges. These resolve "what does week N look like" without every screen
+// needing to know about the block structure directly.
+
+export function getBlockForWeek<T extends { weeks: [number, number] }>(blocks: T[], weekNumber: number): T {
+  return blocks.find(b => weekNumber >= b.weeks[0] && weekNumber <= b.weeks[1]) ?? blocks[blocks.length - 1]
+}
+
+export function getWeekInBlock<T extends { weeks: [number, number] }>(blocks: T[], weekNumber: number): number {
+  const block = getBlockForWeek(blocks, weekNumber)
+  return weekNumber - block.weeks[0] + 1
+}
+
+// Progressive overload within a block: heavier compound lifts step up faster
+// (+5 lbs/week) than lighter accessory work (+2.5 lbs/week). Non-numeric
+// weights ("Bodyweight", "+25 lbs" for weighted bodyweight work, or no
+// weight at all) are left untouched — there's nothing sensible to progress.
+const COMPOUND_LIFTS = ['squat', 'deadlift', 'bench press', 'overhead press', 'clean', 'snatch', 'row']
+export function progressedWeight(weight: string | undefined, exerciseName: string, weekInBlock: number): string | undefined {
+  if (!weight || weekInBlock <= 1) return weight
+  const m = weight.match(/^(\d+(?:\.\d+)?)(.*)$/)
+  if (!m) return weight // "Bodyweight", "+25 lbs", etc. — not a plain numeric base weight
+  const base = parseFloat(m[1])
+  const suffix = m[2]
+  const isCompound = COMPOUND_LIFTS.some(l => exerciseName.toLowerCase().includes(l))
+  const increment = isCompound ? 5 : 2.5
+  const progressed = base + (weekInBlock - 1) * increment
+  const rounded = Math.round(progressed / 2.5) * 2.5
+  return `${rounded}${suffix}`
+}
+
+
 // ─── goal auto-computation (V2) ──────────────────────────────────────────────
 // For goals linked to a real metric, `current` is always derived live rather
 // than trusted from storage, so the Goals screen never shows a stale number.
