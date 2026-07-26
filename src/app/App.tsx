@@ -2000,7 +2000,7 @@ function ProgressScreen() {
   useAppData();
   const [showLogMeas, setShowLogMeas] = useState(false);
   const meas = getMeasurements().filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
-  const hasData = meas.length >= 2 || bestSets().size > 0;
+  const hasData = meas.length >= 1 || bestSets().size > 0;
 
   // Weight chart data, last 8 points
   const weightData = meas.slice(-8).map(m => ({
@@ -2058,7 +2058,7 @@ function ProgressScreen() {
         ) : (
           <>
             {/* Weight chart */}
-            {weightData.length >= 2 && (
+            {weightData.length >= 2 ? (
               <Card>
                 <div className="flex items-center justify-between mb-1">
                   <SectionLabel>Body weight</SectionLabel>
@@ -2089,7 +2089,16 @@ function ProgressScreen() {
                   </ResponsiveContainer>
                 </div>
               </Card>
-            )}
+            ) : currentWeight !== null ? (
+              <Card>
+                <SectionLabel>Body weight</SectionLabel>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{currentWeight}</span>
+                  <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · logged today</span>
+                </div>
+                <p className="text-xs mt-2" style={{ color: C.mut }}>Log one more entry (any day) to start seeing your trend line here.</p>
+              </Card>
+            ) : null}
 
             {/* Measurements */}
             {measCells.length > 0 && (
