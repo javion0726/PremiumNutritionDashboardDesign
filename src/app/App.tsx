@@ -23,7 +23,7 @@ import {
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, todayKey, type ExEntry,
   getMeasurements, saveMeasurements,
-  getGoals, saveGoals,
+  getGoals, saveGoals, getGoalsList, syncCalculatorWeightGoal,
   exportBackup, clearAllData,
 } from "./lib/store";
 import { useAppData } from "./lib/useAppData";
@@ -2212,47 +2212,71 @@ const GOAL_CODES = [
 function CalculatorSheet({ onClose }: { onClose: () => void }) {
   const cfg = getConfig();
   const goals = getGoals();
+  const isMetric = cfg.metricUnits;
+  const wUnit = cfg.weightUnit; // 'lbs' | 'kg'
   const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
   useLockBodyScroll();
 
   const [sex, setSex] = useState<"male" | "female">("male");
   const [age, setAge] = useState("30");
+  // Height: cm when metric, feet+inches when imperial — matches whatever the
+  // user picked in Profile → Unit preferences instead of always showing cm.
   const [heightCm, setHeightCm] = useState(String(cfg.heightCm ?? 178));
+  const [heightFt, setHeightFt] = useState("5");
+  const [heightIn, setHeightIn] = useState("10");
   const [weight, setWeight] = useState("");
   const [goalWeight, setGoalWeight] = useState(String(goals.goalWeight ?? ""));
   const [activityIdx, setActivityIdx] = useState(2);
   const [goalCode, setGoalCode] = useState<typeof GOAL_CODES[number]["code"]>(goals.goalCode as never ?? "lose");
+
+  // Auto-fill body fat % from the most recent measurement, if logged — this
+  // is what unlocks the more accurate Katch-McArdle formula. Editable in
+  // case the user wants to override or clear it.
+  const lastMeas = [...getMeasurements()].sort((a, b) => a.date.localeCompare(b.date)).pop();
+  const [bodyFat, setBodyFat] = useState(lastMeas?.fat ?? "");
+
   const [result, setResult] = useState<ReturnType<typeof calcTargets> | null>(null);
 
+  function resolvedHeightCm(): number {
+    if (isMetric) return parseFloat(heightCm) || 0;
+    const ft = parseFloat(heightFt) || 0, inch = parseFloat(heightIn) || 0;
+    return (ft * 12 + inch) * 2.54;
+  }
+  function toLbs(v: number): number {
+    return wUnit === "kg" ? v * 2.20462 : v;
+  }
+
   function compute() {
-    const w = parseFloat(weight);
-    const gw = parseFloat(goalWeight) || w;
-    const h = parseFloat(heightCm);
+    const wRaw = parseFloat(weight);
+    const gwRaw = parseFloat(goalWeight) || wRaw;
+    const h = resolvedHeightCm();
     const a = parseInt(age);
-    if (!w || !h || !a) return;
+    if (!wRaw || !h || !a) return;
+    const bf = parseFloat(bodyFat);
     const r = calcTargets({
-      sex, age: a, heightCm: h, weightLbs: w, goalWeightLbs: gw,
+      sex, age: a, heightCm: h,
+      weightLbs: toLbs(wRaw), goalWeightLbs: toLbs(gwRaw),
       activity: ACTIVITY_LEVELS[activityIdx].mult, goalCode,
+      bodyFatPct: !isNaN(bf) && bf > 0 ? bf : undefined,
     });
     setResult(r);
   }
 
   function save() {
     if (!result) return;
-    const w = parseFloat(weight);
-    const gw = parseFloat(goalWeight) || w;
+    const wRaw = parseFloat(weight);
+    const gwRaw = parseFloat(goalWeight) || wRaw;
     saveGoals({
       results: { calories: result.calories, protein: result.protein, carbs: result.carbs, fats: result.fats },
-      goalWeight: gw, startWeight: w, goalCode,
+      goalWeight: gwRaw, startWeight: wRaw, goalCode,
     });
-    saveConfig({ activity: ACTIVITY_LEVELS[activityIdx].mult, activityLabel: ACTIVITY_LEVELS[activityIdx].label, heightCm: parseFloat(heightCm) });
+    saveConfig({ activity: ACTIVITY_LEVELS[activityIdx].mult, activityLabel: ACTIVITY_LEVELS[activityIdx].label, heightCm: resolvedHeightCm() });
+    // Keep the Goals tab showing the same target — one canonical weight
+    // goal instead of two disconnected numbers living in different screens.
+    syncCalculatorWeightGoal(wRaw, gwRaw, wUnit);
     onClose();
   }
 
-  const input: React.CSSProperties = {
-    width: "100%", boxSizing: "border-box", background: C.surface, border: `1px solid ${C.border}`,
-    borderRadius: 12, padding: "11px 14px", color: C.pri, fontSize: 14, fontFamily: "Inter, sans-serif", outline: "none",
-  };
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
@@ -2269,7 +2293,7 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="text-xs" style={{ color: C.mut }}>
-          Uses the Mifflin-St Jeor formula to personalize your daily calorie and macro targets across the app.
+          Uses Katch-McArdle (more accurate — based on your real lean mass) when body fat % is known, otherwise Mifflin-St Jeor.
         </p>
 
         <div className="flex gap-2">
@@ -2279,12 +2303,20 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
 
         <div className="flex gap-2">
           <Input label="Age" value={age} onChange={setAge} placeholder="30" type="number" />
-          <Input label="Height (cm)" value={heightCm} onChange={setHeightCm} placeholder="178" type="number" />
+          {isMetric ? (
+            <Input label="Height (cm)" value={heightCm} onChange={setHeightCm} placeholder="178" type="number" />
+          ) : (
+            <div className="flex-1 flex gap-2">
+              <Input label="Height (ft)" value={heightFt} onChange={setHeightFt} placeholder="5" type="number" />
+              <Input label="Height (in)" value={heightIn} onChange={setHeightIn} placeholder="10" type="number" />
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
-          <Input label={`Current weight (${cfg.weightUnit})`} value={weight} onChange={setWeight} placeholder="190" type="number" />
-          <Input label={`Goal weight (${cfg.weightUnit})`} value={goalWeight} onChange={setGoalWeight} placeholder="180" type="number" />
+          <Input label={`Current weight (${wUnit})`} value={weight} onChange={setWeight} placeholder={wUnit === "kg" ? "86" : "190"} type="number" />
+          <Input label={`Goal weight (${wUnit})`} value={goalWeight} onChange={setGoalWeight} placeholder={wUnit === "kg" ? "82" : "180"} type="number" />
         </div>
+        <Input label="Body fat % (optional — improves accuracy)" value={bodyFat} onChange={setBodyFat} placeholder="e.g. 18" type="number" />
 
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.mut }}>Activity level</span>
@@ -2319,7 +2351,9 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
 
         {result && (
           <div className="rounded-2xl p-4 border" style={{ background: C.accentSoft, borderColor: C.accent }}>
-            <p className="text-xs font-semibold mb-2" style={{ color: C.accent }}>Your personalized targets</p>
+            <p className="text-xs font-semibold mb-2" style={{ color: C.accent }}>
+              Your personalized targets · {result.formula === "katch-mcardle" ? "Katch-McArdle" : "Mifflin-St Jeor"}
+            </p>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: "Calories", val: `${result.calories.toLocaleString()} kcal` },

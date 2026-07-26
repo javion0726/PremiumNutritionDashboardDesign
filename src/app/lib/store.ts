@@ -267,6 +267,27 @@ export function deleteGoal(id: string) {
   saveGoalsList(getGoalsList().filter(g => g.id !== id))
 }
 
+// Keeps the Calculator's goal weight and the Goals tab in sync: this always
+// writes to the SAME goal entry (stable id) rather than creating a new one
+// each time, so running the calculator repeatedly updates one canonical
+// "weight goal" instead of leaving orphaned duplicates behind.
+const CALCULATOR_GOAL_ID = 'calc-weight-goal'
+export function syncCalculatorWeightGoal(startWeight: number, goalWeight: number, unit: 'lbs' | 'kg') {
+  const goals = getGoalsList()
+  const existing = goals.find(g => g.id === CALCULATOR_GOAL_ID)
+  const dir: 'up' | 'down' = goalWeight <= startWeight ? 'down' : 'up'
+  const patch: Omit<Goal, 'id' | 'createdAt'> = {
+    title: `Reach ${goalWeight} ${unit}`, category: 'Body composition', unit,
+    dir, start: startWeight, target: goalWeight, current: startWeight,
+    linkedMetric: 'weight', completed: false,
+  }
+  if (existing) {
+    saveGoalsList(goals.map(g => g.id === CALCULATOR_GOAL_ID ? { ...g, ...patch } : g))
+  } else {
+    saveGoalsList([...goals, { ...patch, id: CALCULATOR_GOAL_ID, createdAt: new Date().toISOString() }])
+  }
+}
+
 // ─── active weekly plan (V2) ────────────────────────────────────────────────────
 
 export type ActivePlan = {

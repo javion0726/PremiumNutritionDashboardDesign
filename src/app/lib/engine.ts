@@ -60,12 +60,30 @@ export function calcTargets(input: {
   sex: 'male' | 'female'; age: number; heightCm: number
   weightLbs: number; goalWeightLbs: number; activity: number
   goalCode: 'lose_fast' | 'lose' | 'lose_slow' | 'maintain' | 'gain_slow' | 'gain' | 'recomp'
-}): { calories: number; protein: number; carbs: number; fats: number; tdee: number; floored: boolean } {
+  bodyFatPct?: number  // when known, Katch-McArdle (uses real lean mass) is more accurate than Mifflin-St Jeor
+}): { calories: number; protein: number; carbs: number; fats: number; tdee: number; floored: boolean; formula: 'katch-mcardle' | 'mifflin-st-jeor' } {
   const wKg = input.weightLbs / 2.20462
   const gwKg = input.goalWeightLbs / 2.20462
-  const bmr = input.sex === 'male'
-    ? 10 * wKg + 6.25 * input.heightCm - 5 * input.age + 5
-    : 10 * wKg + 6.25 * input.heightCm - 5 * input.age - 161
+
+  let bmr: number
+  let formula: 'katch-mcardle' | 'mifflin-st-jeor'
+  if (input.bodyFatPct != null && input.bodyFatPct > 0 && input.bodyFatPct < 60) {
+    // Katch-McArdle: BMR = 370 + 21.6 × lean body mass (kg). More accurate
+    // than Mifflin-St Jeor because it's based on actual lean mass rather
+    // than a population-average relationship between weight/height/age.
+    const leanMassKg = wKg * (1 - input.bodyFatPct / 100)
+    bmr = 370 + 21.6 * leanMassKg
+    formula = 'katch-mcardle'
+  } else {
+    // Mifflin-St Jeor — the most accurate formula when body fat % isn't
+    // known (validated as more accurate than Harris-Benedict across most
+    // populations, including in overweight/obese individuals).
+    bmr = input.sex === 'male'
+      ? 10 * wKg + 6.25 * input.heightCm - 5 * input.age + 5
+      : 10 * wKg + 6.25 * input.heightCm - 5 * input.age - 161
+    formula = 'mifflin-st-jeor'
+  }
+
   const tdee = Math.round(bmr * input.activity)
   const adjustments: Record<string, number> = {
     lose_fast: -1000, lose: -500, lose_slow: -250, maintain: 0,
@@ -80,7 +98,7 @@ export function calcTargets(input: {
   const protein = Math.round((gwKg * 2.20462) * perLb)
   const fats = Math.round((calories * 0.25) / 9)
   const carbs = Math.max(0, Math.round((calories - protein * 4 - fats * 9) / 4))
-  return { calories, protein, carbs, fats, tdee, floored: raw < minCal }
+  return { calories, protein, carbs, fats, tdee, floored: raw < minCal, formula }
 }
 
 // ─── discipline score (identical weights to the vanilla app) ─────────────────
