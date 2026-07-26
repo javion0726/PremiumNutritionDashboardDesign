@@ -22,7 +22,7 @@ import {
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, todayKey, type ExEntry,
-  getMeasurements, saveMeasurements,
+  getMeasurements, saveMeasurements, type Measurement,
   getGoals, saveGoals, syncCalculatorWeightGoal,
   getSavedPlanIds, isPlanSaved, toggleSavedPlan,
   exportBackup, clearAllData,
@@ -1998,6 +1998,7 @@ const TRACKED_LIFTS = [
 
 function ProgressScreen() {
   useAppData();
+  const [showLogMeas, setShowLogMeas] = useState(false);
   const meas = getMeasurements().filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
   const hasData = meas.length >= 2 || bestSets().size > 0;
 
@@ -2041,14 +2042,19 @@ function ProgressScreen() {
 
   return (
     <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
-      <div className="px-5 pt-14 pb-5">
-        <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: C.mut }}>Last 12 weeks</p>
-        <h1 className="text-2xl font-bold" style={{ color: C.pri }}>Progress</h1>
+      <div className="flex items-center justify-between px-5 pt-14 pb-5">
+        <div>
+          <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: C.mut }}>Last 12 weeks</p>
+          <h1 className="text-2xl font-bold" style={{ color: C.pri }}>Progress</h1>
+        </div>
+        <button onClick={() => setShowLogMeas(true)} className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accent, color: C.accentFg }}>
+          <Plus size={18} />
+        </button>
       </div>
 
       <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasData ? (
-          <EmptyState icon={<TrendingUp size={28} />} title="No progress data yet" body="Log your weight and workouts consistently to see trends and analytics here." />
+          <EmptyState icon={<TrendingUp size={28} />} title="No progress data yet" body="Log your weight to start tracking trends and analytics here." action="Log measurement" onAction={() => setShowLogMeas(true)} />
         ) : (
           <>
             {/* Weight chart */}
@@ -2152,6 +2158,8 @@ function ProgressScreen() {
           </>
         )}
       </div>
+
+      {showLogMeas && <LogMeasurementSheet onClose={() => setShowLogMeas(false)} />}
     </div>
   );
 }
@@ -2160,6 +2168,86 @@ function ProgressScreen() {
 
 const GOAL_COLORS = [C.accent, "#4A7C6F", "#7A6B5A", "#6B5EA8"];
 const GOAL_CATEGORIES = ["Body composition", "Strength", "Cardio", "Consistency", "Custom"];
+
+function LogMeasurementSheet({ onClose }: { onClose: () => void }) {
+  const cfg = getConfig();
+  const wUnit = cfg.weightUnit;
+  const mUnit = cfg.metricUnits ? "cm" : "in";
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+  useLockBodyScroll();
+
+  const existing = getMeasurements();
+  const today = todayKey();
+  const todayEntry = existing.find(m => m.date === today);
+  const last = [...existing].sort((a, b) => a.date.localeCompare(b.date)).pop();
+
+  const [weight, setWeight] = useState(todayEntry?.weight ?? "");
+  const [fat, setFat] = useState(todayEntry?.fat ?? "");
+  const [chest, setChest] = useState(todayEntry?.chest ?? "");
+  const [waist, setWaist] = useState(todayEntry?.waist ?? "");
+  const [hips, setHips] = useState(todayEntry?.hips ?? "");
+  const [arms, setArms] = useState(todayEntry?.arms ?? "");
+  const [thighs, setThighs] = useState(todayEntry?.thighs ?? "");
+
+  function save() {
+    if (!weight.trim() && !fat.trim() && !chest.trim() && !waist.trim() && !hips.trim() && !arms.trim() && !thighs.trim()) return;
+    const entry: Measurement = {
+      date: today,
+      weight: weight.trim() || undefined, wu: wUnit,
+      fat: fat.trim() || undefined,
+      chest: chest.trim() || undefined, waist: waist.trim() || undefined,
+      hips: hips.trim() || undefined, arms: arms.trim() || undefined, thighs: thighs.trim() || undefined,
+      mu: mUnit,
+    };
+    // One entry per day — logging again today updates today's entry rather
+    // than creating a duplicate.
+    const next = todayEntry
+      ? existing.map(m => m.date === today ? entry : m)
+      : [...existing, entry];
+    saveMeasurements(next);
+    onClose();
+  }
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
+        maxWidth: 430, maxHeight: "88dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
+      }}>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>Log measurement</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-xs" style={{ color: C.mut }}>
+          {todayEntry ? "You've already logged today — this updates that entry." : "All fields optional. Anything you skip stays blank for today."}
+          {last?.weight && !todayEntry ? ` Last logged: ${last.weight} ${last.wu ?? wUnit} on ${new Date(last.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.` : ""}
+        </p>
+
+        <Input label={`Weight (${wUnit})`} value={weight} onChange={setWeight} placeholder={wUnit === "kg" ? "86" : "190"} type="number" />
+        <Input label="Body fat % (optional)" value={fat} onChange={setFat} placeholder="e.g. 18" type="number" />
+
+        <SectionLabel>Body measurements (optional)</SectionLabel>
+        <div className="flex gap-2">
+          <Input label={`Chest (${mUnit})`} value={chest} onChange={setChest} placeholder="" type="number" />
+          <Input label={`Waist (${mUnit})`} value={waist} onChange={setWaist} placeholder="" type="number" />
+        </div>
+        <div className="flex gap-2">
+          <Input label={`Hips (${mUnit})`} value={hips} onChange={setHips} placeholder="" type="number" />
+          <Input label={`Arms (${mUnit})`} value={arms} onChange={setArms} placeholder="" type="number" />
+        </div>
+        <Input label={`Thighs (${mUnit})`} value={thighs} onChange={setThighs} placeholder="" type="number" />
+
+        <div className="mt-2">
+          <Btn full size="lg" onClick={save}>{todayEntry ? "Update today's entry" : "Save measurement"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AddGoalSheet({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("");
@@ -2269,6 +2357,7 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
 function GoalsScreen() {
   useAppData();
   const [showAdd, setShowAdd] = useState(false);
+  const [showLogMeas, setShowLogMeas] = useState(false);
   const goals = getGoalsList().map(g => ({ ...g, current: resolveGoalCurrent(g.linkedMetric, g.current) }));
 
   const active = goals.filter(g => !g.completed);
@@ -2361,6 +2450,11 @@ function GoalsScreen() {
                         if (v && !isNaN(parseFloat(v))) updateGoal(g.id, { current: parseFloat(v) });
                       }}>Update progress</button>
                     )}
+                    {(g.linkedMetric === "weight" || g.linkedMetric === "bodyFat") && !isDone && (
+                      <button className="text-xs font-semibold" style={{ color: C.accent }} onClick={() => setShowLogMeas(true)}>
+                        Log {g.linkedMetric === "weight" ? "weight" : "body fat"}
+                      </button>
+                    )}
                     {!isDone && (
                       <button className="text-xs font-semibold" style={{ color: C.ok }} onClick={() => updateGoal(g.id, { completed: true })}>Mark complete</button>
                     )}
@@ -2374,6 +2468,7 @@ function GoalsScreen() {
       </div>
 
       {showAdd && <AddGoalSheet onClose={() => setShowAdd(false)} />}
+      {showLogMeas && <LogMeasurementSheet onClose={() => setShowLogMeas(false)} />}
     </div>
   );
 }
