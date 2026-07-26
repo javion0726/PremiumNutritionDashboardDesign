@@ -507,12 +507,13 @@ function Onboarding({ onComplete }: { onComplete: () => void }) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 function DashboardScreen({
-  activePlan, onGoToWorkout, onOpenProfile, onBuildWorkout,
+  activePlan, onGoToWorkout, onOpenProfile, onBuildWorkout, onOpenCalculator,
 }: {
   activePlan: ActivePlan | null;
   onGoToWorkout: () => void;
   onOpenProfile: () => void;
   onBuildWorkout: () => void;
+  onOpenCalculator: () => void;
 }) {
   useAppData();
   const cfg = getConfig();
@@ -739,6 +740,12 @@ function DashboardScreen({
                   ))}
                 </div>
               </div>
+              {!targets.personalized && (
+                <button onClick={onOpenCalculator} className="w-full flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+                  <span className="text-xs" style={{ color: C.accent, fontWeight: 600 }}>Using default targets — personalize with the calculator</span>
+                  <ChevronRight size={14} style={{ color: C.accent, flexShrink: 0 }} />
+                </button>
+              )}
             </Card>
 
             {/* Stat tiles */}
@@ -1811,7 +1818,7 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NutritionScreen() {
+function NutritionScreen({ onOpenCalculator }: { onOpenCalculator: () => void }) {
   useAppData();
   const cfg = getConfig();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -1859,6 +1866,19 @@ function NutritionScreen() {
       </div>
 
       <div className="flex flex-col gap-4 px-5 pb-28">
+        {!targets.personalized && (
+          <button onClick={onOpenCalculator} className="rounded-2xl p-4 border text-left flex items-center gap-3"
+            style={{ background: C.accentSoft, borderColor: C.accent }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: C.accent, color: C.accentFg }}>
+              <Target size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.pri }}>You're using default targets</p>
+              <p className="text-xs mt-0.5" style={{ color: C.sec }}>Get calories and macros personalized to your body — takes under a minute.</p>
+            </div>
+            <ChevronRight size={18} style={{ color: C.accent, flexShrink: 0 }} />
+          </button>
+        )}
         {!hasAnyData ? (
           <EmptyState icon={<Utensils size={28} />} title="No meals logged" body="Start tracking your food to see calorie totals, macro breakdown, and daily insights." action="Log first meal" onAction={() => setSheetOpen(true)} />
         ) : (
@@ -2557,12 +2577,12 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProfileScreen({ onClose }: { onClose: () => void }) {
+function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; autoOpenCalculator?: boolean }) {
   useAppData();
   const cfg = getConfig();
   const streak = calcStreak();
   const goals = getGoals();
-  const [showCalc, setShowCalc] = useState(false);
+  const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -2636,7 +2656,6 @@ function ProfileScreen({ onClose }: { onClose: () => void }) {
             <div className="mt-3 rounded-2xl border overflow-hidden" style={{ borderColor: C.border }}>
               {[
                 { label: "Name", value: cfg.name?.trim() || "Not set", onPress: () => editField("your name", "name", cfg.name ?? "") },
-                { label: "Email", value: cfg.email || "Not set", onPress: () => editField("email", "email", cfg.email ?? "") },
                 { label: "Height", value: heightDisplay, onPress: editHeight },
                 { label: "Date of birth", value: dobDisplay, onPress: editDob },
                 { label: "Goal", value: cfg.goal || "Not set", onPress: () => editField("goal", "goal", cfg.goal ?? "") },
@@ -2802,6 +2821,7 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(() => !isOnboarded());
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [showProfile, setShowProfile] = useState(false);
+  const [profileAutoOpenCalc, setProfileAutoOpenCalc] = useState(false);
   const [activePlan, setActivePlanState] = useState<ActivePlan | null>(() => getActivePlan());
   const [workoutInitialView, setWorkoutInitialView] = useState<WorkoutView | undefined>(undefined);
 
@@ -2812,6 +2832,10 @@ export default function App() {
   function goBuildWorkout() {
     setWorkoutInitialView("build");
     setActiveTab("workout");
+  }
+  function goOpenCalculator() {
+    setProfileAutoOpenCalc(true);
+    setShowProfile(true);
   }
 
   if (showOnboarding) {
@@ -2824,7 +2848,12 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "Inter, sans-serif", position: "relative" }}>
-      {showProfile && <ProfileScreen onClose={() => setShowProfile(false)} />}
+      {showProfile && (
+        <ProfileScreen
+          onClose={() => { setShowProfile(false); setProfileAutoOpenCalc(false); }}
+          autoOpenCalculator={profileAutoOpenCalc}
+        />
+      )}
 
       <div className="flex flex-col min-h-screen">
         <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
@@ -2834,6 +2863,7 @@ export default function App() {
               onGoToWorkout={() => setActiveTab("workout")}
               onOpenProfile={() => setShowProfile(true)}
               onBuildWorkout={goBuildWorkout}
+              onOpenCalculator={goOpenCalculator}
             />
           )}
           {activeTab === "workout" && (
@@ -2844,7 +2874,7 @@ export default function App() {
               onConsumedInitialView={() => setWorkoutInitialView(undefined)}
             />
           )}
-          {activeTab === "nutrition" && <NutritionScreen />}
+          {activeTab === "nutrition" && <NutritionScreen onOpenCalculator={goOpenCalculator} />}
           {activeTab === "progress" && <ProgressScreen />}
           {activeTab === "goals" && <GoalsScreen />}
         </div>
