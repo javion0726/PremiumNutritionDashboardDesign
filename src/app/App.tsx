@@ -37,6 +37,10 @@ import {
 } from "./lib/engine";
 import { searchFood, type FoodResult } from "./lib/food";
 import { EX } from "./lib/exercises";
+import { useAuth, signOut } from "./lib/auth";
+import { isSupabaseConfigured } from "./lib/supabase";
+import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
+import AuthScreen from "./AuthScreen";
 
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
 runMigrations();
@@ -132,99 +136,11 @@ function exerciseTargets(name: string): string | null {
 // ─── SPACING GRID (8pt) ──────────────────────────────────────────────────────
 // 4 8 12 16 20 24 32 40 48 56 64px
 
-const C = {
-  bg:         "#F6F5F2",
-  surface:    "#FFFFFF",
-  surfaceAlt: "#EDECEA",
-  border:     "#E3DED8",
-  borderSub:  "#ECEAE5",
-  pri:        "#1A1917",
-  sec:        "#46423E",
-  mut:        "#918D88",
-  accent:     "#1F5C3A",
-  accentFg:   "#FFFFFF",
-  accentSoft: "#E8F3EC",
-  accentMid:  "rgba(31,92,58,0.12)",
-  ok:         "#276749",
-  okSoft:     "#EDFAF3",
-  warn:       "#9A4F0F",
-  warnSoft:   "#FEF3E8",
-  err:        "#B91C1C",
-  errSoft:    "#FEF2F2",
-} as const;
+import { C, Btn, Input, Card, SectionLabel } from "./ui";
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
 type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build";
 type DisplayState = "populated" | "empty" | "loading" | "error";
-
-// ─── PRIMITIVE COMPONENTS ─────────────────────────────────────────────────────
-
-function Btn({
-  variant = "primary", size = "md", full = false, disabled = false,
-  onClick, children,
-}: {
-  variant?: "primary" | "secondary" | "ghost";
-  size?: "sm" | "md" | "lg";
-  full?: boolean; disabled?: boolean;
-  onClick?: () => void; children: React.ReactNode;
-}) {
-  const base = "font-semibold rounded-xl transition-all active:scale-[0.97] inline-flex items-center justify-center gap-2 cursor-pointer";
-  const sz = { sm: "px-3 py-2 text-xs min-h-[36px]", md: "px-4 py-2.5 text-sm min-h-[44px]", lg: "px-5 py-3 text-sm min-h-[48px]" }[size];
-  const v = {
-    primary: { background: C.accent, color: C.accentFg, border: "none" },
-    secondary: { background: C.surface, color: C.pri, border: `1px solid ${C.border}` },
-    ghost: { background: "transparent", color: C.sec, border: "none" },
-  }[variant];
-  return (
-    <button onClick={onClick} disabled={disabled}
-      className={`${base} ${sz} ${full ? "w-full" : ""} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
-      style={v}>
-      {children}
-    </button>
-  );
-}
-
-function Input({
-  label, value, onChange, placeholder = "", type = "text",
-}: {
-  label?: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; type?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {label && <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.mut }}>{label}</span>}
-      <input
-        type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all min-h-[48px]"
-        style={{
-          background: C.surface, color: C.pri, border: `1px solid ${C.border}`,
-          fontFamily: "Inter, sans-serif",
-        }}
-        onFocus={e => (e.target.style.borderColor = C.accent)}
-        onBlur={e => (e.target.style.borderColor = C.border)}
-      />
-    </div>
-  );
-}
-
-function Card({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
-  return (
-    <div onClick={onClick}
-      className={`rounded-2xl p-4 border ${className} ${onClick ? "cursor-pointer active:scale-[0.98] transition-transform" : ""}`}
-      style={{ background: C.surface, borderColor: C.border }}>
-      {children}
-    </div>
-  );
-}
-
-function SectionLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <span className={`text-xs font-semibold uppercase tracking-widest ${className}`} style={{ color: C.mut, letterSpacing: "0.08em" }}>
-      {children}
-    </span>
-  );
-}
 
 function ProgressBar({ value, max = 100, color = C.accent, height = 6 }: { value: number; max?: number; color?: string; height?: number }) {
   return (
@@ -2688,6 +2604,7 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const streak = calcStreak();
   const goals = getGoals();
   const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
+  const { user } = useAuth();
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -2848,6 +2765,27 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
             </div>
           </div>
 
+          {/* Account */}
+          {isSupabaseConfigured && user && (
+            <div>
+              <SectionLabel>Account</SectionLabel>
+              <div className="mt-3 rounded-2xl border overflow-hidden" style={{ borderColor: C.border }}>
+                <div className="flex items-center justify-between px-4 py-3" style={{ background: C.surface, minHeight: 48 }}>
+                  <span className="text-sm" style={{ color: C.pri }}>Signed in as</span>
+                  <span className="text-sm" style={{ color: C.mut }}>{user.email}</span>
+                </div>
+                <Divider />
+                <button
+                  onClick={async () => { await signOut(); onClose(); }}
+                  className="w-full flex items-center gap-3 px-4 py-3"
+                  style={{ background: C.surface, minHeight: 48 }}>
+                  <LogOut size={16} style={{ color: C.err }} />
+                  <span className="text-sm font-semibold" style={{ color: C.err }}>Sign out</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Data */}
           <div>
             <SectionLabel>Data & privacy</SectionLabel>
@@ -2861,11 +2799,13 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
           </div>
 
           <button onClick={doClear} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border" style={{ background: C.surface, borderColor: C.border, minHeight: 48 }}>
-            <LogOut size={16} style={{ color: C.err }} />
+            <Shield size={16} style={{ color: C.err }} />
             <span className="text-sm font-semibold" style={{ color: C.err }}>Clear all data</span>
           </button>
           <p className="text-xs text-center px-4" style={{ color: C.mut }}>
-            Your data is stored only on this device — there's no account system yet, so there's nothing to sign out of.
+            {isSupabaseConfigured && user
+              ? "This clears data stored on this device only — your cloud backup is not affected. Sign out and back in to restore it."
+              : "Your data is stored only on this device — there's no account system yet, so there's nothing to sign out of."}
           </p>
         </div>
       </div>
@@ -3008,7 +2948,55 @@ function InstallPrompt() {
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
 
-export default function App() {
+function LoadingScreen({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "Inter, sans-serif" }}
+      className="flex items-center justify-center">
+      <p className="text-sm" style={{ color: C.mut }}>{label}</p>
+    </div>
+  );
+}
+
+// Gates the whole app behind sign-in once Supabase is actually configured.
+// If it isn't configured (e.g. local dev with no .env, or a deployment that
+// hasn't set up the backend yet), this is a no-op and the app behaves exactly
+// as it did before any of this existed — local-only, no login required.
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const [adopting, setAdopting] = useState(false);
+  const [adoptionDoneFor, setAdoptionDoneFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    if (!user) { setSyncUser(null); return; }
+    if (adoptionDoneFor === user.id) { setSyncUser(user.id); return; }
+    let cancelled = false;
+    setAdopting(true);
+    adoptLocalDataIfNeeded(user.id)
+      .catch(err => console.warn("Local data adoption failed:", err))
+      .finally(() => {
+        if (cancelled) return;
+        setSyncUser(user.id);
+        setAdopting(false);
+        setAdoptionDoneFor(user.id);
+      });
+    return () => { cancelled = true; };
+  }, [user?.id, adoptionDoneFor]);
+
+  if (!isSupabaseConfigured) return <>{children}</>;
+  if (loading) return <LoadingScreen />;
+  if (!user) {
+    return (
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh" }}>
+        <AuthScreen />
+      </div>
+    );
+  }
+  if (adopting || adoptionDoneFor !== user.id) return <LoadingScreen label="Setting up your account…" />;
+  return <>{children}</>;
+}
+
+function AppShell() {
   const [, forceUpdate] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(() => !isOnboarded());
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -3075,5 +3063,13 @@ export default function App() {
         <TabBar active={activeTab} onChange={setActiveTab} />
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthGate>
+      <AppShell />
+    </AuthGate>
   );
 }

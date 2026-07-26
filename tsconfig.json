@@ -17,5 +17,5 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src/app/App.tsx", "src/app/lib", "src/main.tsx"]
+  "include": ["src/app/App.tsx", "src/app/ui.tsx", "src/app/AuthScreen.tsx", "src/app/lib", "src/main.tsx", "src/vite-env.d.ts"]
 }

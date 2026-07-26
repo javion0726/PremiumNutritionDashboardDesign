@@ -283,6 +283,11 @@ export function syncCalculatorWeightGoal(startWeight: number, goalWeight: number
     title: `Reach ${goalWeight} ${unit}`, category: 'Body composition', unit,
     dir, start: startWeight, target: goalWeight, current: startWeight,
     linkedMetric: 'weight', completed: false,
+    // Keep whatever color this goal already had on repeat calculator runs
+    // (so its card doesn't visually shift color each time); default to the
+    // app's accent color (matches C.accent in App.tsx) for a brand-new goal.
+    // store.ts is UI-agnostic and doesn't import from App.tsx, hence the literal.
+    color: existing?.color ?? '#1F5C3A',
   }
   if (existing) {
     saveGoalsList(goals.map(g => g.id === CALCULATOR_GOAL_ID ? { ...g, ...patch } : g))
