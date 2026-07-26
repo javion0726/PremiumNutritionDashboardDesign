@@ -2973,9 +2973,20 @@ function InstallPrompt() {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold" style={{ color: C.pri }}>Install Ascend</p>
           {isIOS ? (
-            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: C.mut }}>
-              Tap <Share2 size={11} style={{ display: 'inline', verticalAlign: -1 }} /> Share, then "Add to Home Screen" for the full app experience.
-            </p>
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold" style={{ background: C.accentSoft, color: C.accent, fontSize: 10 }}>1</span>
+                <p className="text-xs" style={{ color: C.sec }}>
+                  Tap the <Share2 size={12} style={{ display: 'inline', verticalAlign: -2, color: C.accent }} /> <b>Share</b> button in Safari's toolbar
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold" style={{ background: C.accentSoft, color: C.accent, fontSize: 10 }}>2</span>
+                <p className="text-xs" style={{ color: C.sec }}>
+                  Scroll down and tap <b>"Add to Home Screen"</b>
+                </p>
+              </div>
+            </div>
           ) : (
             <p className="text-xs mt-0.5 leading-relaxed" style={{ color: C.mut }}>
               Add Ascend to your home screen for quick access and offline use.
@@ -3022,6 +3033,7 @@ export default function App() {
   if (showOnboarding) {
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        <InstallPrompt />
         <Onboarding onComplete={() => { setShowOnboarding(false); forceUpdate(n => n + 1); }} />
       </div>
     );
