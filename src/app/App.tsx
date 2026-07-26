@@ -40,8 +40,62 @@ import { EX } from "./lib/exercises";
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
 runMigrations();
 
+// Original lines written for Ascend — deliberately not quoting real people,
+// to keep this free of copyright/misattribution risk. Tone matches the
+// app's calm, data-driven voice rather than loud hype.
+const DAILY_QUOTES: string[] = [
+  "Discipline is choosing what you want most over what you want now.",
+  "Small, repeated actions outperform occasional heroics.",
+  "The workout you don't want to do is usually the one you need most.",
+  "Consistency is a quiet kind of confidence.",
+  "You don't need to feel motivated. You just need to show up.",
+  "Progress hides inside boring, repeated days.",
+  "Today's effort is a deposit you won't feel until later.",
+  "The body adapts to what you consistently ask of it.",
+  "Rest is part of the plan, not a break from it.",
+  "You're not starting over. You're continuing.",
+  "One more rep than yesterday is still progress.",
+  "The habit matters more than the mood you have about it.",
+  "Nobody regrets the workout they finished.",
+  "Strength is built in the sets you almost skipped.",
+  "Show up for the version of you that's still becoming.",
+  "Slow progress is still progress moving in the right direction.",
+  "Discipline now buys freedom later.",
+  "The plan works if you work the plan.",
+  "You are the average of what you repeat, not what you intend.",
+  "Every log entry is a vote for who you're becoming.",
+  "It doesn't have to be perfect. It has to be done.",
+  "The best time to train was yesterday. The second best is now.",
+  "Comfort and growth rarely live in the same room.",
+  "Your future self is watching what you do today.",
+  "Momentum is easier to keep than to rebuild.",
+  "Small wins compound faster than big plans.",
+  "Effort is the only input you fully control.",
+  "You're not behind. You're exactly where consistency put you.",
+  "The goal isn't motivation — it's a system you don't have to feel motivated to run.",
+  "What you do on hard days is what separates good months from average ones.",
+];
+
+// Same quote all day, changes at midnight, cycles through the full list
+// before repeating — deterministic on the date, not random per page load.
+function getDailyQuote(): string {
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const diff = Date.now() - start.getTime();
+  const dayOfYear = Math.floor(diff / 86400000);
+  return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
+}
+
 function ytURL(name: string): string {
   return "https://www.youtube.com/results?search_query=" + encodeURIComponent(name + " exercise tutorial form");
+}
+
+// Many exercises are timed or distance-based rather than rep-counted (cardio
+// intervals, planks, sprints, carries) and their `reps` field already carries
+// its own unit — "30 sec", "40 meters", "10 each". Only a bare number or
+// range like "12" or "8–10" actually means a rep count and needs " reps"
+// appended; anything else already reads correctly as-is.
+function formatReps(reps: string): string {
+  return /^\d+(?:[–-]\d+)?$/.test(reps.trim()) ? `${reps} reps` : reps;
 }
 
 // Case-insensitive, tolerant lookup: plan/custom exercise names don't always
@@ -530,6 +584,12 @@ function DashboardScreen({
         </div>
       </div>
 
+      <div className="px-5 pb-1">
+        <p className="text-sm italic leading-relaxed" style={{ color: C.sec }}>
+          "{getDailyQuote()}"
+        </p>
+      </div>
+
       <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasAnyData ? (
           <EmptyState
@@ -882,7 +942,7 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
               {currentEx.sets} sets
             </span>
           </div>
-          <p className="text-sm mb-1" style={{ color: C.mut }}>{currentEx.reps} reps{currentEx.weight ? ` · ${currentEx.weight}` : ""}</p>
+          <p className="text-sm mb-1" style={{ color: C.mut }}>{formatReps(currentEx.reps)}{currentEx.weight ? ` · ${currentEx.weight}` : ""}</p>
           {exerciseTargets(currentEx.name) && (
             <p className="text-xs mb-4" style={{ color: C.accent }}>Targets: {exerciseTargets(currentEx.name)}</p>
           )}
