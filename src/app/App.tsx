@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar,
+  Timer, Calendar, Share2, Smartphone,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -18,6 +18,7 @@ import {
 import { PLANS, type WeeklyPlan, type PlanDay, type Exercise, type Block } from "./lib/plans";
 import {
   getConfig, saveConfig, isOnboarded, markOnboarded, runMigrations,
+  isInstallPromptDismissed, dismissInstallPrompt,
   getActivePlan, saveActivePlan, type ActivePlan,
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
@@ -2918,6 +2919,82 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
   );
 }
 
+// ─── INSTALL PROMPT ───────────────────────────────────────────────────────────
+// Android/Chrome supports a real programmatic install trigger via the
+// `beforeinstallprompt` event. iOS Safari has never implemented that API at
+// all — Add to Home Screen there is a manual Share-sheet action only — so iOS
+// gets an instructional banner instead of a fake "Install" button that would
+// silently do nothing.
+
+function InstallPrompt() {
+  const [deferredEvent, setDeferredEvent] = useState<any>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [dismissed, setDismissed] = useState(() => isInstallPromptDismissed());
+
+  useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase();
+    setIsIOS(/iphone|ipad|ipod/.test(ua) && !(window as any).MSStream);
+    setIsStandalone(
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    );
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredEvent(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  if (isStandalone || dismissed) return null;
+  if (!isIOS && !deferredEvent) return null; // Android/desktop browser hasn't signaled installability yet
+
+  function close() {
+    dismissInstallPrompt();
+    setDismissed(true);
+  }
+
+  async function installAndroid() {
+    if (!deferredEvent) return;
+    deferredEvent.prompt();
+    await deferredEvent.userChoice; // resolves regardless of accept/dismiss
+    setDeferredEvent(null);
+    close();
+  }
+
+  return (
+    <div className="px-4 pt-3" style={{ position: 'relative', zIndex: 30 }}>
+      <Card className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: C.accentSoft, color: C.accent }}>
+          <Smartphone size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold" style={{ color: C.pri }}>Install Ascend</p>
+          {isIOS ? (
+            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: C.mut }}>
+              Tap <Share2 size={11} style={{ display: 'inline', verticalAlign: -1 }} /> Share, then "Add to Home Screen" for the full app experience.
+            </p>
+          ) : (
+            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: C.mut }}>
+              Add Ascend to your home screen for quick access and offline use.
+            </p>
+          )}
+          {!isIOS && (
+            <button onClick={installAndroid} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: C.accent, color: C.accentFg }}>
+              Install
+            </button>
+          )}
+        </div>
+        <button onClick={close} aria-label="Dismiss" className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ color: C.mut }}>
+          <X size={14} />
+        </button>
+      </Card>
+    </div>
+  );
+}
+
 // ─── APP ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -2961,6 +3038,7 @@ export default function App() {
 
       <div className="flex flex-col min-h-screen">
         <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+          {activeTab === "dashboard" && <InstallPrompt />}
           {activeTab === "dashboard" && (
             <DashboardScreen
               activePlan={activePlan}

@@ -229,6 +229,9 @@ export function clearAllData() {
 export function isOnboarded(): boolean { return load<boolean>('rj_ob_done', false) }
 export function markOnboarded() { save('rj_ob_done', true) }
 
+export function isInstallPromptDismissed(): boolean { return load<boolean>('rj_install_dismissed', false) }
+export function dismissInstallPrompt() { save('rj_install_dismissed', true) }
+
 // ─── custom goals (V2) ─────────────────────────────────────────────────────────
 // Distinct from the calculator's single GoalResults — this is a user-managed
 // list of arbitrary targets (weight, lift numbers, streak length, custom
