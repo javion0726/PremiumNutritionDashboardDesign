@@ -17,18 +17,24 @@
       <meta name="apple-mobile-web-app-title" content="Ascend" />
       <style>
         html, body { height: 100%; margin: 0; } #root { height: 100%; }
-        /* Portrait-only: iOS Safari never implemented the Screen Orientation
-           Lock API (even for installed PWAs), so a pure-CSS blocker is the
-           only approach that works reliably across every platform. */
-        #landscape-blocker { display: none; }
-        @media (orientation: landscape) {
-          #root { display: none; }
-          #landscape-blocker {
-            display: flex; position: fixed; inset: 0; z-index: 9999;
-            background: #F6F5F2; color: #1A1917;
-            align-items: center; justify-content: center; text-align: center;
-            flex-direction: column; padding: 32px; box-sizing: border-box;
-            font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        /* Portrait lock — visually. iOS Safari never implemented the Screen
+           Orientation Lock API (even for installed PWAs), so this rotates
+           the whole page back to portrait via CSS when a real touch device
+           is turned sideways, instead of showing a blocking message.
+
+           Scoped to (hover: none) and (pointer: coarse) — genuine touch
+           devices only. Without this, "orientation: landscape" alone also
+           matches any wide desktop browser window and would incorrectly
+           rotate/hide the app there too. */
+        @media screen and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+          html {
+            transform: rotate(-90deg);
+            transform-origin: left top;
+            width: 100vh;
+            overflow-x: hidden;
+            position: absolute;
+            top: 100%;
+            left: 0;
           }
         }
       </style>
@@ -38,11 +44,6 @@
     <body>
       
       <div id="root"></div>
-      <div id="landscape-blocker">
-        <div style="font-size:40px;margin-bottom:16px;">📱</div>
-        <p style="font-size:17px;font-weight:700;margin:0 0 6px;">Please rotate your device</p>
-        <p style="font-size:14px;color:#918D88;margin:0;">Ascend is designed for portrait mode.</p>
-      </div>
       <script type="module" src="/src/main.tsx"></script>
       
     </body>
