@@ -65,8 +65,14 @@ export async function requestPasswordReset(email: string): Promise<{ error?: str
 // browser — the anon key the client normally uses cannot do this.
 export async function deleteAccount(): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return { error: 'You need to be signed in to delete your account.' }
+  // Force a fresh token rather than trusting whatever's cached — for an
+  // action this sensitive, "the cached session looked present but the
+  // underlying token had actually expired" shouldn't require the user to
+  // manually sign out and back in to work around it.
+  const { data: { session }, error: refreshError } = await supabase.auth.refreshSession()
+  if (refreshError || !session) {
+    return { error: 'Your session has expired — please sign out and back in, then try again.' }
+  }
   try {
     const res = await fetch('/.netlify/functions/delete-account', {
       method: 'POST',
