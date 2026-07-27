@@ -196,12 +196,26 @@ export async function pullAll(userId: string): Promise<void> {
 // device), the remote data wins and gets pulled down instead — it should
 // never be silently overwritten by whatever happens to be on this device.
 
-export async function adoptLocalDataIfNeeded(userId: string): Promise<'adopted' | 'pulled' | 'already-done' | 'skipped'> {
+// Runs on every login. The FIRST time an account is ever used anywhere, this
+// decides whether to adopt this device's local data into the (empty) account
+// or pull down existing cloud data (if this account was already set up on
+// another device first). After that one-time decision, every subsequent
+// login — on this device or any other — simply pulls the latest cloud state,
+// which is what actually keeps multiple devices in sync. The earlier version
+// of this function stopped doing anything at all once the one-time flag was
+// set, which is why a second device never received data from the first.
+export async function adoptLocalDataIfNeeded(userId: string): Promise<'adopted' | 'pulled' | 'skipped'> {
   if (!supabase) return 'skipped'
 
   const { data: status } = await supabase.from('migration_status').select('*').eq('user_id', userId).maybeSingle()
-  if (status?.local_data_adopted) return 'already-done'
 
+  if (status?.local_data_adopted) {
+    // Established account — always sync the latest cloud state down on login.
+    await pullAll(userId)
+    return 'pulled'
+  }
+
+  // First login ever for this account, anywhere.
   const { data: existingJournal } = await supabase.from('journal').select('date').eq('user_id', userId).limit(1)
   const hasRemoteData = !!(existingJournal && existingJournal.length)
   const hasLocalData = Object.keys(getJournal()).length > 0
