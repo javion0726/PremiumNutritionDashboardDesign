@@ -4,10 +4,12 @@
 
 1. **Run `SUPABASE_SCHEMA.sql`** in your Supabase project's SQL Editor. This creates every table, enables RLS, and sets up the auto-create-profile-on-signup trigger.
 2. **Enable email auth** in your Supabase project (Authentication → Providers → Email should already be on by default).
-3. **Set environment variables:**
-   - Local dev: copy `.env.example` to `.env`, fill in your project URL + anon key.
-   - Netlify: Site configuration → Environment variables → add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-4. Deploy. If either variable is missing, the app runs exactly as it did before this work — local-only, no login. Nothing breaks by leaving it unconfigured; this is deliberate.
+3. **Set environment variables in Netlify** (Site configuration → Environment variables):
+   - `VITE_SUPABASE_URL` — your project URL (client-side, safe to expose)
+   - `VITE_SUPABASE_ANON_KEY` — your anon public key (client-side, safe to expose)
+   - `SUPABASE_URL` — same value as above, WITHOUT the `VITE_` prefix (used server-side by the delete-account function; the prefix matters because Vite only bundles `VITE_`-prefixed variables into client code, and this one must stay server-only)
+   - `SUPABASE_SERVICE_ROLE_KEY` — Project Settings → API → **service_role** key. **Treat this like a password.** It has full admin access to your database and bypasses Row Level Security entirely. It must never be prefixed `VITE_`, never appear in client code, and only be used inside `netlify/functions/`.
+4. Deploy. If any of the four variables above are missing, the app falls back to local-only mode (no login) — nothing breaks, it just won't have accounts yet.
 
 ## What was actually verified vs. what needs your eyes
 
@@ -19,6 +21,7 @@
 - The pre-existing `syncCalculatorWeightGoal` type bug — found and fixed, unrelated to this work
 
 **Cannot verify from here, genuinely needs your testing:**
+- **Account deletion end-to-end.** I verified the code is structurally correct (identity verification via the caller's own token, admin deletion only after that succeeds, `on delete cascade` on every table so deleting the auth user removes all their data automatically) — but I cannot actually call Supabase's admin API from this environment. Test this once, with a throwaway test account: sign up, log some data, delete the account, then confirm in the Supabase dashboard (Authentication → Users, and spot-check a couple of your tables) that both the user and their rows are actually gone.
 - A real sign-up → email confirmation → sign-in flow against your actual Supabase project (my sandbox can't reach any real Supabase instance)
 - The local-data adoption flow with real data — I've read the logic carefully and it matches the design in the schema/sync code, but "does it feel right when a real user with months of real workout history signs up for the first time" is something only real testing answers
 - RLS policies actually blocking cross-user access — the SQL is written correctly per Supabase's documented patterns, but I'd recommend manually testing with two accounts once this is live: confirm account A genuinely cannot see account B's data

@@ -37,7 +37,7 @@ import {
 } from "./lib/engine";
 import { searchFood, type FoodResult } from "./lib/food";
 import { EX } from "./lib/exercises";
-import { useAuth, signOut } from "./lib/auth";
+import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
 import AuthScreen from "./AuthScreen";
@@ -2605,6 +2605,7 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const goals = getGoals();
   const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
   const { user } = useAuth();
+  const [deleting, setDeleting] = useState(false);
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -2630,7 +2631,25 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
     a.click();
     URL.revokeObjectURL(url);
   }
-  function doClear() {
+  async function doClear() {
+    if (isSupabaseConfigured && user) {
+      // Signed in: "clear data" means the real thing — delete the account
+      // and every row of cloud data with it, not just what's on this device.
+      if (!confirm(
+        "This permanently deletes your account and ALL cloud data — workouts, meals, measurements, goals, everything. This cannot be undone. Continue?"
+      )) return;
+      setDeleting(true);
+      const result = await deleteAccount();
+      setDeleting(false);
+      if (result.error) {
+        alert("Couldn't delete your account: " + result.error);
+        return;
+      }
+      clearAllData();
+      onClose();
+      location.reload();
+      return;
+    }
     if (confirm("This permanently deletes all workouts, meals, measurements, and goals stored on this device. This cannot be undone. Continue?")) {
       clearAllData();
       onClose();
@@ -2798,13 +2817,15 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
             </div>
           </div>
 
-          <button onClick={doClear} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border" style={{ background: C.surface, borderColor: C.border, minHeight: 48 }}>
+          <button onClick={doClear} disabled={deleting} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border" style={{ background: C.surface, borderColor: C.border, minHeight: 48, opacity: deleting ? 0.6 : 1 }}>
             <Shield size={16} style={{ color: C.err }} />
-            <span className="text-sm font-semibold" style={{ color: C.err }}>Clear all data</span>
+            <span className="text-sm font-semibold" style={{ color: C.err }}>
+              {deleting ? "Deleting…" : (isSupabaseConfigured && user ? "Delete account & all data" : "Clear all data")}
+            </span>
           </button>
           <p className="text-xs text-center px-4" style={{ color: C.mut }}>
             {isSupabaseConfigured && user
-              ? "This clears data stored on this device only — your cloud backup is not affected. Sign out and back in to restore it."
+              ? "This permanently deletes your account and everything in it, on this device and in the cloud. There's no undo."
               : "Your data is stored only on this device — there's no account system yet, so there's nothing to sign out of."}
           </p>
         </div>

@@ -58,6 +58,30 @@ export async function requestPasswordReset(email: string): Promise<{ error?: str
   }
 }
 
+// Permanently deletes the signed-in user's account AND all their cloud data
+// (every table cascades from auth.users via "on delete cascade" in the
+// schema). This calls a server-side Netlify Function because deleting an
+// auth user requires the service role key, which must never reach the
+// browser — the anon key the client normally uses cannot do this.
+export async function deleteAccount(): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return { error: 'You need to be signed in to delete your account.' }
+  try {
+    const res = await fetch('/.netlify/functions/delete-account', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) return { error: body.error || 'Could not delete your account — please try again.' }
+    // The account is gone server-side; clear the now-invalid local session too.
+    await supabase.auth.signOut()
+    return {}
+  } catch {
+    return { error: NETWORK_ERROR_MESSAGE }
+  }
+}
+
 // React hook: current auth state, updates live on sign-in/sign-out/token refresh.
 export function useAuth(): AuthState {
   const [state, setState] = useState<AuthState>({ user: null, session: null, loading: true })
