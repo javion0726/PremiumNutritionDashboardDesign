@@ -22,7 +22,7 @@ import {
   getActivePlan, saveActivePlan, type ActivePlan,
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
-  getDay, saveDay, todayKey, type ExEntry,
+  getDay, saveDay, getJournal, todayKey, type ExEntry,
   getMeasurements, saveMeasurements, type Measurement,
   getGoals, saveGoals, syncCalculatorWeightGoal,
   getSavedPlanIds, isPlanSaved, toggleSavedPlan,
@@ -425,12 +425,16 @@ function Onboarding({ onComplete }: { onComplete: () => void }) {
 
 function DashboardScreen({
   activePlan, onGoToWorkout, onOpenProfile, onBuildWorkout, onOpenCalculator,
+  onGoToNutrition, onGoToGoals, onGoToProgress,
 }: {
   activePlan: ActivePlan | null;
   onGoToWorkout: () => void;
   onOpenProfile: () => void;
   onBuildWorkout: () => void;
   onOpenCalculator: () => void;
+  onGoToNutrition: () => void;
+  onGoToGoals: () => void;
+  onGoToProgress: () => void;
 }) {
   useAppData();
   const cfg = getConfig();
@@ -510,17 +514,59 @@ function DashboardScreen({
 
       <div className="flex flex-col gap-4 px-5 pb-28">
         {!hasAnyData ? (
-          <EmptyState
-            icon={<Dumbbell size={28} />}
-            title="No workout data yet"
-            body="Set up your first plan and start training to see your Discipline Score and daily summary here."
-            action="Browse plans"
-            onAction={onGoToWorkout}
-            secondaryAction="or build your own workout"
-            onSecondaryAction={onBuildWorkout}
-          />
+          <div className="flex flex-col gap-5">
+            {/* Real plan data, not a placeholder — tapping goes straight to Workout */}
+            <div>
+              <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Popular plans to get started</p>
+              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                {PLANS.slice(0, 3).map(p => (
+                  <button key={p.id} onClick={onGoToWorkout}
+                    className="flex-shrink-0 w-40 text-left p-4 rounded-2xl border"
+                    style={{ background: C.surface, borderColor: C.border }}>
+                    <p className="text-[10px] font-mono uppercase tracking-wide mb-1.5" style={{ color: C.accent }}>{p.difficulty}</p>
+                    <p className="font-semibold text-sm mb-1" style={{ color: C.pri }}>{p.name}</p>
+                    <p className="text-xs leading-snug mb-2" style={{ color: C.mut }}>{p.tagline}</p>
+                    <p className="text-[10px] font-mono" style={{ color: C.mut }}>{p.duration}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Every real first action a brand-new user might take — not just
+                "log a workout." Someone might land here having never logged
+                anything at all; each card is a genuine, working shortcut. */}
+            <div>
+              <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Get started</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={onBuildWorkout} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                  <Dumbbell size={20} style={{ color: C.accent }} />
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Start a workout</p>
+                </button>
+                <button onClick={onGoToNutrition} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                  <Utensils size={20} style={{ color: C.accent }} />
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Log a meal</p>
+                </button>
+                <button onClick={onGoToGoals} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                  <Target size={20} style={{ color: C.accent }} />
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Set a goal</p>
+                </button>
+                <button onClick={onGoToProgress} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                  <Scale size={20} style={{ color: C.accent }} />
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Track a measurement</p>
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
           <>
+            {/* Today's insight — moved to the top: this is the one card built
+                from your actual data, not a generic layout piece, so it leads
+                instead of trailing after everything else. */}
+            <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
+              <p className="text-sm" style={{ color: C.sec }}>{todayInsight}</p>
+            </div>
+
             {/* Discipline Score */}
             <Card>
               <div className="flex items-center justify-between mb-4">
@@ -683,12 +729,6 @@ function DashboardScreen({
                 </div>
               ))}
             </div>
-
-            {/* Today's insight — rule-based, computed from real data, not fabricated */}
-            <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
-              <p className="text-sm" style={{ color: C.sec }}>{todayInsight}</p>
-            </div>
           </>
         )}
       </div>
@@ -727,6 +767,17 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Frozen at session start — the best weight logged for each exercise
+  // BEFORE today, excluding today's own entry. This is what a set gets
+  // compared against, not the live-updating map (which would already
+  // include a set logged a minute ago in this same session).
+  const [priorBests] = useState(() => {
+    const j = getJournal();
+    const { [key]: _today, ...rest } = j;
+    return bestSets(rest as typeof j);
+  });
+  const [prFlash, setPrFlash] = useState<{ exercise: string; weight: number } | null>(null);
+
   function addExerciseMidSession(name: string) {
     const ex: Exercise = { name, sets: 3, reps: "10", weight: "" };
     const nextExercises = [...exercises, ex];
@@ -757,18 +808,42 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
     return () => clearTimeout(t);
   }, [restSeconds, isPaused]);
 
+  // Rest-complete cue. Vibration only exists on Android — iOS Safari has
+  // never implemented the Vibration API, on any version, as an Apple policy
+  // decision, not a bug — so the visual pulse is the fallback that actually
+  // reaches iPhone users, and runs everywhere else too rather than only there.
+  const [restPulse, setRestPulse] = useState(false);
+  useEffect(() => {
+    if (restSeconds !== 0) return;
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(200);
+    }
+    setRestPulse(true);
+    const t = setTimeout(() => setRestPulse(false), 700);
+    return () => clearTimeout(t);
+  }, [restSeconds]);
+
   const totalSets = exercises.reduce((a, e) => a + e.sets, 0);
   const doneSets = setLogs.flat().filter(s => s.done).length;
   const currentEx = exercises[exIdx];
   const currentLogs = setLogs[exIdx];
 
   const markDone = (sIdx: number) => {
+    const weight = parseFloat(currentLogs[sIdx].weight);
+    const priorBest = priorBests.get(currentEx.name);
+    const isNewPR = !isNaN(weight) && weight > 0 && (!priorBest || weight > priorBest.weight);
+
     setSetLogs(prev => {
       const n = prev.map(e => [...e]);
       n[exIdx][sIdx] = { ...n[exIdx][sIdx], done: true };
       return n;
     });
     setRestSeconds(restDefault);
+
+    if (isNewPR) {
+      setPrFlash({ exercise: currentEx.name, weight });
+      setTimeout(() => setPrFlash(null), 2800);
+    }
   };
 
   const updateLog = (sIdx: number, field: "weight" | "reps", val: string) => {
@@ -794,6 +869,13 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
           <span className="text-xs font-mono" style={{ color: C.mut }}>{doneSets}/{totalSets}</span>
         </div>
       </div>
+
+      {/* New PR celebration */}
+      {prFlash && (
+        <div className="mx-5 mb-2 px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-2" style={{ background: C.accent, color: C.accentFg }}>
+          🏆 New PR — {prFlash.exercise} at {prFlash.weight} {cfg.weightUnit}!
+        </div>
+      )}
 
       {/* Session progress */}
       <div className="px-5 mb-4">
@@ -853,7 +935,7 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
 
       {/* Current exercise */}
       <div className="flex-1 px-5 pb-28 flex flex-col gap-4">
-        <Card>
+        <Card className="transition-all duration-300" style={restPulse ? { boxShadow: `0 0 0 3px ${C.accent}`, background: C.accentSoft } : undefined}>
           <div className="flex items-start justify-between mb-1 gap-3">
             <h2 className="text-lg font-bold flex-1" style={{ color: C.pri }}>{currentEx.name}</h2>
             <a href={ytURL(currentEx.name)} target="_blank" rel="noopener noreferrer"
@@ -887,7 +969,7 @@ function ActiveSessionView({ exercises: initialExercises, planName, dayLabel, we
                 <span className="w-6 text-xs font-mono text-center" style={{ color: C.mut }}>{sIdx + 1}</span>
                 <input
                   value={log.weight} onChange={e => updateLog(sIdx, "weight", e.target.value)}
-                  placeholder={currentEx.weight ?? "lbs"}
+                  placeholder={currentEx.weight || cfg.weightUnit}
                   disabled={log.done}
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl text-sm font-mono outline-none border min-h-[44px]"
                   style={{ background: log.done ? C.surfaceAlt : C.surface, borderColor: C.border, color: C.pri, opacity: log.done ? 0.6 : 1, width: 0 }}
@@ -2418,6 +2500,105 @@ const GOAL_CODES = [
   { code: "gain" as const, label: "Build muscle" },
 ];
 
+const FAQ_ITEMS: { q: string; a: string }[] = [
+  {
+    q: "What happens to my data if I delete my account?",
+    a: "It's permanent and immediate — your account and every row of your data (journal, measurements, goals, everything) are deleted from the cloud at the same time, with no recovery option. Data stored only on this device (if you're not signed in) isn't touched by cloud deletion.",
+  },
+  {
+    q: "Does the app work without internet?",
+    a: "Yes — your data is always saved on your device first and instantly, whether or not you're online. If you're signed in, it also syncs to the cloud in the background when a connection is available, but nothing about logging a workout or a meal ever waits on that.",
+  },
+  {
+    q: "Why isn't my data showing up on my other device yet?",
+    a: "Sync happens when you open or sign into the app, not continuously in real time between two devices that are both open at once. Closing and reopening the app (or signing out and back in) on the other device will pull the latest data down.",
+  },
+  {
+    q: "How is my Discipline Score calculated?",
+    a: "From your actual logged workouts, nutrition, and recovery signals for the day — it's a real computed number based on what you've entered, not an estimate or a marketing figure.",
+  },
+  {
+    q: "What's the difference between following a Plan and building a custom workout?",
+    a: "A Plan is a full structured program with a set schedule, periodized weeks, and progressive overload built in — good if you'd rather not design your own training. A custom workout is built from the exercise library one movement at a time, for when you already know what you want to do.",
+  },
+  {
+    q: "Is the Coach feed actually AI?",
+    a: "No — it's rule-based feedback computed directly from your real logged data (things like your protein gap, streak momentum, or discipline trend). It's not AI-generated, and it never invents an insight it can't support with your actual numbers.",
+  },
+];
+
+function FAQSheet({ onClose }: { onClose: () => void }) {
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+  useLockBodyScroll();
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
+        maxWidth: 430, maxHeight: "88dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
+      }}>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>FAQ</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex flex-col gap-2 mt-1">
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={i} className="rounded-2xl border overflow-hidden" style={{ borderColor: C.border, background: C.surface }}>
+              <button onClick={() => setOpenIdx(openIdx === i ? null : i)} className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left">
+                <span className="text-sm font-semibold" style={{ color: C.pri }}>{item.q}</span>
+                <ChevronRight size={16} style={{ color: C.mut, transform: openIdx === i ? "rotate(90deg)" : undefined, transition: "transform 0.15s", flexShrink: 0 }} />
+              </button>
+              {openIdx === i && (
+                <p className="text-sm px-4 pb-4 leading-relaxed" style={{ color: C.sec }}>{item.a}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ABOUT_TEXT = [
+  "Ascend is built for people who want real structure, not another app to check.",
+  "Most fitness apps make you choose: a workout logger, a food tracker, a progress app — usually three separate subscriptions that don't talk to each other. Ascend puts your training, nutrition, measurements, and goals in one place, because your actual results depend on how those things work together, not any one of them alone.",
+  "You don't need to already know what you're doing to start. If you're not sure what a workout should even look like, Ascend gives you real structured plans built around progressive overload — you don't have to design one yourself. Every exercise comes with a guide and target-muscle breakdown, so you're never standing in a gym (or your living room) wondering how something's supposed to be done. And if you'd rather build your own workout from scratch, the full exercise library is there for that too.",
+  "This isn't built for casual step-counting. It's for someone actively working toward something specific — a strength number, a body composition goal, a level of consistency — who wants their plan, their food, and their progress tracked honestly, without invented data or inflated claims. The Discipline Score, streaks, and Coach feed exist to keep you accountable to that goal — not to gamify you into checking an app you don't need.",
+];
+
+function AboutSheet({ onClose }: { onClose: () => void }) {
+  const { handlers, sheetStyle } = useSwipeToDismiss(onClose);
+  useLockBodyScroll();
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)", height: "100dvh", overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div onClick={e => e.stopPropagation()} className="w-full flex flex-col gap-3 px-5 pt-5" style={{
+        maxWidth: 430, maxHeight: "88dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", background: C.bg,
+        borderRadius: "24px 24px 0 0", border: `1px solid ${C.border}`, paddingBottom: 32,
+        ...sheetStyle,
+      }}>
+        <div {...handlers} className="w-9 h-1 rounded-full mx-auto" style={{ background: C.border, touchAction: "none", cursor: "grab", padding: "8px 0" }} />
+        <div className="flex items-center justify-between">
+          <p className="text-lg font-bold" style={{ color: C.pri }}>About Ascend</p>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.sec }}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex flex-col gap-4 mt-1">
+          {ABOUT_TEXT.map((p, i) => (
+            <p key={i} className="text-sm leading-relaxed" style={{ color: C.sec }}>{p}</p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CalculatorSheet({ onClose }: { onClose: () => void }) {
   const cfg = getConfig();
   const goals = getGoals();
@@ -2604,6 +2785,8 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const streak = calcStreak();
   const goals = getGoals();
   const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
+  const [showFAQ, setShowFAQ] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
 
@@ -2817,6 +3000,22 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
             </div>
           </div>
 
+          <div>
+            <SectionLabel>Support</SectionLabel>
+            <div className="mt-3 rounded-2xl border overflow-hidden" style={{ borderColor: C.border }}>
+              <button onClick={() => setShowFAQ(true)} className="w-full flex items-center gap-3 px-4 py-3 border-b" style={{ background: C.surface, borderColor: C.border, minHeight: 48 }}>
+                <AlertCircle size={16} style={{ color: C.sec }} />
+                <span className="text-sm flex-1 text-left" style={{ color: C.pri }}>FAQ</span>
+                <ChevronRight size={16} style={{ color: C.mut }} />
+              </button>
+              <button onClick={() => setShowAbout(true)} className="w-full flex items-center gap-3 px-4 py-3" style={{ background: C.surface, minHeight: 48 }}>
+                <Activity size={16} style={{ color: C.sec }} />
+                <span className="text-sm flex-1 text-left" style={{ color: C.pri }}>About Ascend</span>
+                <ChevronRight size={16} style={{ color: C.mut }} />
+              </button>
+            </div>
+          </div>
+
           <button onClick={doClear} disabled={deleting} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border" style={{ background: C.surface, borderColor: C.border, minHeight: 48, opacity: deleting ? 0.6 : 1 }}>
             <Shield size={16} style={{ color: C.err }} />
             <span className="text-sm font-semibold" style={{ color: C.err }}>
@@ -2832,6 +3031,8 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
       </div>
 
       {showCalc && <CalculatorSheet onClose={() => setShowCalc(false)} />}
+      {showFAQ && <FAQSheet onClose={() => setShowFAQ(false)} />}
+      {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
     </div>
   );
 }
@@ -3067,6 +3268,9 @@ function AppShell() {
               onOpenProfile={() => setShowProfile(true)}
               onBuildWorkout={goBuildWorkout}
               onOpenCalculator={goOpenCalculator}
+              onGoToNutrition={() => setActiveTab("nutrition")}
+              onGoToGoals={() => setActiveTab("goals")}
+              onGoToProgress={() => setActiveTab("progress")}
             />
           )}
           {activeTab === "workout" && (
