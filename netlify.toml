@@ -4,6 +4,14 @@
 
 [functions]
   directory = "netlify/functions"
+  node_bundler = "esbuild"
+  # stripe's package.json has export conditions that esbuild's automatic
+  # dependency bundling doesn't resolve correctly in Netlify's function
+  # runtime, causing "Cannot find package 'stripe'" at invoke time even
+  # though it built successfully and is a real, installed dependency. Marking
+  # it external tells Netlify to include the actual node_modules/stripe
+  # folder alongside the function instead of trying to inline it.
+  external_node_modules = ["stripe"]
 
 # The service worker must never be long-cached, or users get stuck on old builds.
 [[headers]]
