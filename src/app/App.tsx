@@ -40,7 +40,9 @@ import { EX } from "./lib/exercises";
 import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
+import { useSubscription, hasActiveAccess, openBillingPortal } from "./lib/subscription";
 import AuthScreen from "./AuthScreen";
+import PaywallScreen from "./PaywallScreen";
 
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
 runMigrations();
@@ -2804,6 +2806,7 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const [showAbout, setShowAbout] = useState(false);
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -2991,6 +2994,21 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
                   <span className="text-sm" style={{ color: C.pri }}>Signed in as</span>
                   <span className="text-sm" style={{ color: C.mut }}>{user.email}</span>
                 </div>
+                <Divider />
+                <button
+                  onClick={async () => {
+                    setPortalLoading(true);
+                    const result = await openBillingPortal();
+                    if (result.error) { alert(result.error); setPortalLoading(false); }
+                  }}
+                  disabled={portalLoading}
+                  className="w-full flex items-center gap-3 px-4 py-3"
+                  style={{ background: C.surface, minHeight: 48, opacity: portalLoading ? 0.6 : 1 }}>
+                  <span className="text-sm flex-1 text-left" style={{ color: C.pri }}>
+                    {portalLoading ? "Opening…" : "Manage subscription"}
+                  </span>
+                  <ChevronRight size={16} style={{ color: C.mut }} />
+                </button>
                 <Divider />
                 <button
                   onClick={async () => { await signOut(); onClose(); }}
@@ -3202,6 +3220,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [adopting, setAdopting] = useState(false);
   const [adoptionDoneFor, setAdoptionDoneFor] = useState<string | null>(null);
+  const subscription = useSubscription(user?.id ?? null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -3230,6 +3249,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
   if (adopting || adoptionDoneFor !== user.id) return <LoadingScreen label="Setting up your account…" />;
+  if (subscription.loading) return <LoadingScreen />;
+  if (!hasActiveAccess(subscription.status)) {
+    return (
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh" }}>
+        <PaywallScreen status={subscription.status} />
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 
