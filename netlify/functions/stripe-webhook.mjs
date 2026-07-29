@@ -53,6 +53,17 @@ export default async (request) => {
 
   const admin = createClient(supabaseUrl, serviceRoleKey);
 
+  // Stripe's "Basil" API version (2025-03-31+) removed current_period_end
+  // from the top-level Subscription object and moved it to each subscription
+  // item instead — subscription.current_period_end is now always undefined
+  // on current API versions. This account is on a newer version still, so
+  // this matters here. Reading defensively in case items is ever empty.
+  function getPeriodEnd(subscription) {
+    const itemEnd = subscription.items?.data?.[0]?.current_period_end;
+    if (!itemEnd) return null;
+    return new Date(itemEnd * 1000).toISOString();
+  }
+
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -65,7 +76,7 @@ export default async (request) => {
           stripe_subscription_id: subscription.id,
           subscription_status: subscription.status,
           trial_ends_at: subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null,
-          subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          subscription_current_period_end: getPeriodEnd(subscription),
         }).eq('id', userId);
         break;
       }
@@ -76,7 +87,7 @@ export default async (request) => {
         await admin.from('profiles').update({
           subscription_status: subscription.status,
           trial_ends_at: subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null,
-          subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          subscription_current_period_end: getPeriodEnd(subscription),
         }).eq('id', userId);
         break;
       }
