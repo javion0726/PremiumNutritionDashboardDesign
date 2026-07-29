@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar, Share2, Smartphone,
+  Timer, Calendar, Share2, Smartphone, Quote,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -48,42 +48,33 @@ runMigrations();
 // Original lines written for Ascend — deliberately not quoting real people,
 // to keep this free of copyright/misattribution risk. Tone matches the
 // app's calm, data-driven voice rather than loud hype.
-const DAILY_QUOTES: string[] = [
-  "Discipline is choosing what you want most over what you want now.",
-  "Small, repeated actions outperform occasional heroics.",
-  "The workout you don't want to do is usually the one you need most.",
-  "Consistency is a quiet kind of confidence.",
-  "You don't need to feel motivated. You just need to show up.",
-  "Progress hides inside boring, repeated days.",
-  "Today's effort is a deposit you won't feel until later.",
-  "The body adapts to what you consistently ask of it.",
-  "Rest is part of the plan, not a break from it.",
-  "You're not starting over. You're continuing.",
-  "One more rep than yesterday is still progress.",
-  "The habit matters more than the mood you have about it.",
-  "Nobody regrets the workout they finished.",
-  "Strength is built in the sets you almost skipped.",
-  "Show up for the version of you that's still becoming.",
-  "Slow progress is still progress moving in the right direction.",
-  "Discipline now buys freedom later.",
-  "The plan works if you work the plan.",
-  "You are the average of what you repeat, not what you intend.",
-  "Every log entry is a vote for who you're becoming.",
-  "It doesn't have to be perfect. It has to be done.",
-  "The best time to train was yesterday. The second best is now.",
-  "Comfort and growth rarely live in the same room.",
-  "Your future self is watching what you do today.",
-  "Momentum is easier to keep than to rebuild.",
-  "Small wins compound faster than big plans.",
-  "Effort is the only input you fully control.",
-  "You're not behind. You're exactly where consistency put you.",
-  "The goal isn't motivation — it's a system you don't have to feel motivated to run.",
-  "What you do on hard days is what separates good months from average ones.",
+// Real quotes from real people, each checked for accuracy — verified against
+// original sources (books, filmed speeches, primary interviews) rather than
+// trusted from how often they're repeated online, since inspirational-quote
+// misattribution is extremely common. One quote we nearly included ("It isn't
+// the mountains ahead... it's the pebble in your shoe," often credited to
+// Muhammad Ali) turned out to be an anonymous saying from 1916, only pinned
+// on him decades later — exactly the kind of mistake this list is meant to
+// avoid, so it's deliberately not here.
+type Quote = { text: string; author: string };
+const DAILY_QUOTES: Quote[] = [
+  { text: "It's not whether you get knocked down, it's whether you get up.", author: "Vince Lombardi" },
+  { text: "It's what you learn after you know it all that counts.", author: "John Wooden" },
+  { text: "We all have dreams. But in order to make dreams come into reality, it takes an awful lot of determination, dedication, self-discipline, and effort.", author: "Jesse Owens" },
+  { text: "It's hard to beat a person who never gives up.", author: "Babe Ruth" },
+  { text: "Never underestimate the power of dreams and the influence of the human spirit.", author: "Wilma Rudolph" },
+  { text: "You have to work hard in the dark to shine in the light.", author: "Kobe Bryant" },
+  { text: "I've failed over and over and over again in my life. And that is why I succeed.", author: "Michael Jordan" },
+  { text: "Champions keep playing until they get it right.", author: "Billie Jean King" },
+  { text: "Success is a journey, not a destination. The doing is often more important than the outcome.", author: "Arthur Ashe" },
+  { text: "I hated every minute of training, but I said, don't quit. Suffer now and live the rest of your life as a champion.", author: "Muhammad Ali" },
+  { text: "Don't give up. Don't ever give up.", author: "Jim Valvano" },
+  { text: "The credit belongs to the man who is actually in the arena, who strives valiantly, who errs and comes short again and again, but who at the best knows in the end the triumph of high achievement.", author: "Theodore Roosevelt" },
 ];
 
 // Same quote all day, changes at midnight, cycles through the full list
 // before repeating — deterministic on the date, not random per page load.
-function getDailyQuote(): string {
+function getDailyQuote(): Quote {
   const start = new Date(new Date().getFullYear(), 0, 0);
   const diff = Date.now() - start.getTime();
   const dayOfYear = Math.floor(diff / 86400000);
@@ -506,10 +497,16 @@ function DashboardScreen({
         </div>
       </div>
 
-      <div className="px-5 pb-1">
-        <p className="text-sm italic leading-relaxed" style={{ color: C.sec }}>
-          "{getDailyQuote()}"
-        </p>
+      <div className="px-5 mb-4">
+        <div className="p-4 rounded-2xl border" style={{ background: C.surface, borderColor: C.border }}>
+          <Quote size={18} style={{ color: C.accent, marginBottom: 6 }} />
+          <p className="text-sm italic leading-relaxed" style={{ color: C.sec }}>
+            {getDailyQuote().text}
+          </p>
+          <p className="text-xs mt-2 font-semibold" style={{ color: C.accent }}>
+            — {getDailyQuote().author}
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-col gap-4 px-5 pb-28">
