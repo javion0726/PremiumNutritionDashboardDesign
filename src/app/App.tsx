@@ -49,36 +49,51 @@ runMigrations();
 // to keep this free of copyright/misattribution risk. Tone matches the
 // app's calm, data-driven voice rather than loud hype.
 // Real quotes from real people, each checked for accuracy — verified against
-// original sources (books, filmed speeches, primary interviews) rather than
-// trusted from how often they're repeated online, since inspirational-quote
-// misattribution is extremely common. One quote we nearly included ("It isn't
-// the mountains ahead... it's the pebble in your shoe," often credited to
-// Muhammad Ali) turned out to be an anonymous saying from 1916, only pinned
-// on him decades later — exactly the kind of mistake this list is meant to
-// avoid, so it's deliberately not here.
+// original sources (books, filmed speeches, primary interviews, dated press
+// conferences) rather than trusted from how often they're repeated online,
+// since inspirational-quote misattribution is extremely common. A few things
+// deliberately dropped along the way, for a reason each time:
+//  - "It isn't the mountains ahead... it's the pebble in your shoe," often
+//    credited to Muhammad Ali, is actually an anonymous saying from 1916,
+//    only pinned on him decades later.
+//  - Lance Armstrong's "Pain is temporary" is genuinely his (his own memoir),
+//    but his doping scandal makes him a bad fit for a discipline/effort app
+//    regardless of the quote's accuracy.
+//  - Ronnie Coleman's famous bodybuilding line is real and iconic but uses
+//    profanity that doesn't match this app's tone.
+//  - Herb Brooks' "the legs feed the wolf" is mostly documented through the
+//    2004 film "Miracle" rather than independently verified as something the
+//    real Herb Brooks said — left out given the thinner evidence.
+// This set is curated specifically for the moment right after finishing a
+// workout — about pushing through effort in the moment, not general life
+// wisdom — so several otherwise-solid quotes (Wooden, Rudolph, Ashe,
+// Roosevelt) were intentionally left out of this particular list for being
+// better fits elsewhere than for this exact spot.
 type Quote = { text: string; author: string };
-const DAILY_QUOTES: Quote[] = [
+const WORKOUT_QUOTES: Quote[] = [
   { text: "It's not whether you get knocked down, it's whether you get up.", author: "Vince Lombardi" },
-  { text: "It's what you learn after you know it all that counts.", author: "John Wooden" },
-  { text: "We all have dreams. But in order to make dreams come into reality, it takes an awful lot of determination, dedication, self-discipline, and effort.", author: "Jesse Owens" },
-  { text: "It's hard to beat a person who never gives up.", author: "Babe Ruth" },
-  { text: "Never underestimate the power of dreams and the influence of the human spirit.", author: "Wilma Rudolph" },
   { text: "You have to work hard in the dark to shine in the light.", author: "Kobe Bryant" },
   { text: "I've failed over and over and over again in my life. And that is why I succeed.", author: "Michael Jordan" },
-  { text: "Champions keep playing until they get it right.", author: "Billie Jean King" },
-  { text: "Success is a journey, not a destination. The doing is often more important than the outcome.", author: "Arthur Ashe" },
-  { text: "I hated every minute of training, but I said, don't quit. Suffer now and live the rest of your life as a champion.", author: "Muhammad Ali" },
+  { text: "It's hard to beat a person who never gives up.", author: "Babe Ruth" },
   { text: "Don't give up. Don't ever give up.", author: "Jim Valvano" },
-  { text: "The credit belongs to the man who is actually in the arena, who strives valiantly, who errs and comes short again and again, but who at the best knows in the end the triumph of high achievement.", author: "Theodore Roosevelt" },
+  { text: "Champions keep playing until they get it right.", author: "Billie Jean King" },
+  { text: "I hated every minute of training, but I said, don't quit. Suffer now and live the rest of your life as a champion.", author: "Muhammad Ali" },
+  { text: "When you want to succeed as bad as you want to breathe, then you'll be successful.", author: "Eric Thomas" },
+  { text: "I don't stop when I'm tired. I stop when I'm done.", author: "David Goggins" },
+  { text: "The last three or four reps is what makes the muscle grow. This area of pain divides the champion from someone who is not a champion.", author: "Arnold Schwarzenegger" },
+  { text: "To give anything less than your best is to sacrifice the gift.", author: "Steve Prefontaine" },
+  { text: "Today I will do what others won't, so tomorrow I can do what others can't.", author: "Jerry Rice" },
+  { text: "No human is limited.", author: "Eliud Kipchoge" },
+  { text: "Only the disciplined ones in life are free. If you are undisciplined, you are a slave to your moods and your passions.", author: "Eliud Kipchoge" },
+  { text: "I fear not the man who has practiced 10,000 kicks once, but I fear the man who has practiced one kick 10,000 times.", author: "Bruce Lee" },
+  { text: "You can't put a limit on anything. The more you dream, the farther you get.", author: "Michael Phelps" },
+  { text: "I really think a champion is defined not by their wins but by how they can recover when they fall.", author: "Serena Williams" },
 ];
 
-// Same quote all day, changes at midnight, cycles through the full list
-// before repeating — deterministic on the date, not random per page load.
-function getDailyQuote(): Quote {
-  const start = new Date(new Date().getFullYear(), 0, 0);
-  const diff = Date.now() - start.getTime();
-  const dayOfYear = Math.floor(diff / 86400000);
-  return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
+// A different quote each time a workout finishes — random, not tied to the
+// date, since the moment (finishing a workout) is what triggers it now.
+function getRandomWorkoutQuote(): Quote {
+  return WORKOUT_QUOTES[Math.floor(Math.random() * WORKOUT_QUOTES.length)];
 }
 
 function ytURL(name: string): string {
@@ -494,18 +509,6 @@ function DashboardScreen({
           <button onClick={onOpenProfile} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, background: C.surfaceAlt, color: C.sec }}>
             <User size={18} />
           </button>
-        </div>
-      </div>
-
-      <div className="px-5 mb-4">
-        <div className="p-4 rounded-2xl border" style={{ background: C.surface, borderColor: C.border }}>
-          <Quote size={18} style={{ color: C.accent, marginBottom: 6 }} />
-          <p className="text-sm italic leading-relaxed" style={{ color: C.sec }}>
-            {getDailyQuote().text}
-          </p>
-          <p className="text-xs mt-2 font-semibold" style={{ color: C.accent }}>
-            — {getDailyQuote().author}
-          </p>
         </div>
       </div>
 
@@ -1231,6 +1234,7 @@ function WorkoutScreen({
   }
   const [showActive, setShowActive] = useState(false);
   const [toast, setToast] = useState("");
+  const [completionQuote, setCompletionQuote] = useState<Quote | null>(null);
   // The custom session's exercise list is persisted (rj_active_custom) so it
   // survives switching tabs. `showCustomActive` is local — it only controls
   // whether we're looking at the full-screen logging view right now; exiting
@@ -1260,6 +1264,7 @@ function WorkoutScreen({
       onSetActivePlan({ ...activePlan, currentWeek: next.currentWeek, currentDayIdx: next.currentDayIdx });
       flash("Workout saved. Plan advanced to the next day.");
     }
+    setCompletionQuote(getRandomWorkoutQuote());
     onPlanChanged?.();
   }
 
@@ -1282,6 +1287,7 @@ function WorkoutScreen({
     setCustomSession(null);
     setShowCustomActive(false);
     flash("Workout saved.");
+    setCompletionQuote(getRandomWorkoutQuote());
   }
 
   // Custom (non-plan) workout — actively being logged right now
@@ -1576,6 +1582,18 @@ function WorkoutScreen({
       {toast && (
         <div className="mx-5 mb-3 px-4 py-3 rounded-xl text-sm font-medium" style={{ background: C.accentSoft, color: C.accent }}>
           {toast}
+        </div>
+      )}
+
+      {completionQuote && (
+        <div className="mx-5 mb-3 p-4 rounded-2xl border cursor-pointer" style={{ background: C.surface, borderColor: C.border }} onClick={() => setCompletionQuote(null)}>
+          <Quote size={18} style={{ color: C.accent, marginBottom: 6 }} />
+          <p className="text-sm italic leading-relaxed" style={{ color: C.sec }}>
+            {completionQuote.text}
+          </p>
+          <p className="text-xs mt-2 font-semibold" style={{ color: C.accent }}>
+            — {completionQuote.author}
+          </p>
         </div>
       )}
 
