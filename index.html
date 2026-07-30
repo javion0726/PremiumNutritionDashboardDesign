@@ -18,24 +18,30 @@
       <style>
         html, body { height: 100%; margin: 0; } #root { height: 100%; }
         /* Portrait lock — visually. iOS Safari never implemented the Screen
-           Orientation Lock API (even for installed PWAs), so this rotates
-           the whole page back to portrait via CSS when a real touch device
-           is turned sideways, instead of showing a blocking message.
+           Orientation Lock API (even for installed PWAs), so there's no way
+           to truly force portrait in a plain browser tab. Rather than try to
+           visually rotate the app's content back (which still ends up
+           looking cramped and confusing, sitting in an odd rotated strip),
+           this just covers the screen with a simple, clear prompt to rotate
+           back — the standard pattern for single-orientation mobile apps.
 
            Scoped to (hover: none) and (pointer: coarse) — genuine touch
-           devices only. Without this, "orientation: landscape" alone also
-           matches any wide desktop browser window and would incorrectly
-           rotate/hide the app there too. */
+           devices only, so a normal wide desktop browser window (which also
+           matches "orientation: landscape") is never affected. */
+        #rotate-lock { display: none; }
         @media screen and (orientation: landscape) and (hover: none) and (pointer: coarse) {
-          html {
-            transform: rotate(-90deg);
-            transform-origin: left top;
-            width: 100vh;
-            overflow-x: hidden;
-            position: absolute;
-            top: 100%;
-            left: 0;
+          #root { display: none; }
+          #rotate-lock {
+            display: flex;
+            position: fixed; inset: 0;
+            flex-direction: column; align-items: center; justify-content: center;
+            gap: 16px; padding: 24px; text-align: center;
+            background: #F6F5F2; font-family: Inter, system-ui, sans-serif;
+            z-index: 9999;
           }
+          #rotate-lock svg { width: 40px; height: 40px; color: #1F5C3A; }
+          #rotate-lock p { margin: 0; color: #1A1917; font-size: 15px; font-weight: 600; }
+          #rotate-lock span { color: #918D88; font-size: 13px; }
         }
       </style>
       
@@ -44,6 +50,14 @@
     <body>
       
       <div id="root"></div>
+      <div id="rotate-lock">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="3" width="10" height="18" rx="2" transform="rotate(90 12 12)"/>
+          <path d="M17 12l3-2m0 0l3 2m-3-2v6"/>
+        </svg>
+        <p>Rotate your device back to portrait</p>
+        <span>Ascend is designed for portrait use only</span>
+      </div>
       <script type="module" src="/src/main.tsx"></script>
       
     </body>
