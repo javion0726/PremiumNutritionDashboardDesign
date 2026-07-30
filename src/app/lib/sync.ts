@@ -86,8 +86,15 @@ export async function pushAll(): Promise<void> {
     streak_goal: goals.streakGoal ?? null, goal_code: goals.goalCode ?? null, updated_at: now,
   })
 
+  // goals_list: delete-then-insert, same pattern as measurements above.
+  // Upsert alone was the bug here — it only ever adds/updates rows, so a
+  // goal deleted locally never got removed from Supabase, meaning the next
+  // sync-pull (which happens on every app open) brought the "deleted" goal
+  // right back. Deleting everything for this user first and re-inserting
+  // exactly what's local now makes deletions actually stick.
+  await supabase.from('goals_list').delete().eq('user_id', uid)
   if (goalsList.length) {
-    await supabase.from('goals_list').upsert(goalsList.map(g => ({
+    await supabase.from('goals_list').insert(goalsList.map(g => ({
       id: g.id, user_id: uid, title: g.title, category: g.category, unit: g.unit, dir: g.dir,
       start: g.start, target: g.target, current: g.current, deadline: g.deadline ?? null,
       color: g.color, linked_metric: g.linkedMetric, linked_exercise: g.linkedExercise ?? null,
