@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar, Share2, Smartphone, Quote,
+  Timer, Calendar, Share2, Smartphone, Quote, Users,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -38,6 +38,12 @@ import {
 import { searchFood, type FoodResult } from "./lib/food";
 import { EX } from "./lib/exercises";
 import { useAuth, signOut, deleteAccount } from "./lib/auth";
+import {
+  createGroup, getMyCoachedGroups, getMyMemberGroups, getGroupMembers,
+  joinGroupByCode, postWorkoutToGroup, getGroupWorkouts, logGroupWorkoutResult,
+  getGroupWorkoutResults, getMyResultForWorkout,
+  type Group, type GroupWorkout, type GroupWorkoutLog,
+} from "./lib/groups";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
 import { useSubscription, hasActiveAccess, openBillingPortal } from "./lib/subscription";
@@ -147,7 +153,7 @@ function exerciseTargets(name: string): string | null {
 import { C, Btn, Input, Card, SectionLabel } from "./ui";
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
-type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build";
+type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups";
 type DisplayState = "populated" | "empty" | "loading" | "error";
 
 function ProgressBar({ value, max = 100, color = C.accent, height = 6 }: { value: number; max?: number; color?: string; height?: number }) {
@@ -1208,6 +1214,409 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
   );
 }
 
+// ─── Coach groups ───────────────────────────────────────────────────────────
+// A coach creates a group, posts workouts to it (reusing the same exercise
+// picker as a normal custom workout), and can see each member's own logged
+// results. Members join via a short invite code and log results the exact
+// same way they'd log any other workout — ActiveSessionView itself is
+// reused unmodified; this only reads back what it already saved to log a
+// copy against the group workout too.
+type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active";
+
+function GroupsSection({ onBack }: { onBack: () => void }) {
+  const [gView, setGView] = useState<GroupsView>("list");
+  const [coachedGroups, setCoachedGroups] = useState<Group[]>([]);
+  const [memberGroups, setMemberGroups] = useState<Group[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [groupWorkouts, setGroupWorkouts] = useState<GroupWorkout[]>([]);
+  const [selectedWorkout, setSelectedWorkout] = useState<GroupWorkout | null>(null);
+  const [memberCount, setMemberCount] = useState(0);
+  const [results, setResults] = useState<GroupWorkoutLog[]>([]);
+  const [myResult, setMyResult] = useState<GroupWorkoutLog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [nameInput, setNameInput] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [createdCode, setCreatedCode] = useState<string | null>(null);
+
+  async function loadList() {
+    setLoading(true);
+    const [coached, member] = await Promise.all([getMyCoachedGroups(), getMyMemberGroups()]);
+    setCoachedGroups(coached);
+    setMemberGroups(member);
+    setLoading(false);
+  }
+  useEffect(() => { loadList(); }, []);
+
+  async function openCoachDetail(g: Group) {
+    setSelectedGroup(g);
+    setLoading(true);
+    const [workouts, members] = await Promise.all([getGroupWorkouts(g.id), getGroupMembers(g.id)]);
+    setGroupWorkouts(workouts);
+    setMemberCount(members.filter(m => m.role === 'member').length);
+    setLoading(false);
+    setGView("coach-detail");
+  }
+  async function openMemberDetail(g: Group) {
+    setSelectedGroup(g);
+    setLoading(true);
+    const workouts = await getGroupWorkouts(g.id);
+    setGroupWorkouts(workouts);
+    setLoading(false);
+    setGView("member-detail");
+  }
+  async function openResults(w: GroupWorkout) {
+    setSelectedWorkout(w);
+    setLoading(true);
+    const r = await getGroupWorkoutResults(w.id);
+    setResults(r);
+    setLoading(false);
+    setGView("results");
+  }
+  async function openMemberWorkout(w: GroupWorkout) {
+    setSelectedWorkout(w);
+    setLoading(true);
+    const mine = await getMyResultForWorkout(w.id);
+    setMyResult(mine);
+    setLoading(false);
+    setGView("member-workout");
+  }
+
+  async function handleCreate() {
+    if (!nameInput.trim()) { setError("Enter a group name"); return; }
+    setError(""); setLoading(true);
+    const { group, error: err } = await createGroup(nameInput.trim());
+    setLoading(false);
+    if (err) { setError(err); return; }
+    setNameInput("");
+    setCreatedCode(group!.invite_code);
+    await loadList();
+  }
+
+  async function handleJoin() {
+    if (!codeInput.trim()) { setError("Enter an invite code"); return; }
+    setError(""); setLoading(true);
+    const { error: err } = await joinGroupByCode(codeInput.trim());
+    setLoading(false);
+    if (err) { setError(err); return; }
+    setCodeInput("");
+    await loadList();
+    setGView("list");
+  }
+
+  // After finishing a group workout in ActiveSessionView, read back what it
+  // just saved to today's personal journal entry and log a copy against the
+  // group workout — rather than modifying ActiveSessionView itself, which
+  // already handles its own persistence and is well-tested as-is.
+  async function handleGroupWorkoutComplete() {
+    if (!selectedWorkout) { setGView("member-detail"); return; }
+    const day = getDay(todayKey());
+    const postedNames = new Set(selectedWorkout.exercises.map(e => e.name));
+    const matching = (day.exArr || []).filter(e => postedNames.has(e.name));
+    if (matching.length) {
+      await logGroupWorkoutResult(selectedWorkout.id, matching.map(e => ({ name: e.name, sets: e.sets })));
+    }
+    setGView("member-detail");
+  }
+
+  const backHeader = (title: string, onBackClick: () => void) => (
+    <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+      <button onClick={onBackClick} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+        <ChevronLeft size={18} />
+      </button>
+      <h2 className="text-lg font-bold" style={{ color: C.pri }}>{title}</h2>
+    </div>
+  );
+
+  // ── Active session for a posted group workout ──
+  if (gView === "active" && selectedWorkout) {
+    return (
+      <ActiveSessionView
+        exercises={selectedWorkout.exercises}
+        planName={selectedGroup?.name || "Group Workout"}
+        dayLabel={selectedWorkout.title}
+        onComplete={handleGroupWorkoutComplete}
+        onExit={() => setGView("member-workout")}
+      />
+    );
+  }
+
+  // ── Post a workout (coach) ──
+  if (gView === "post-workout" && selectedGroup) {
+    return (
+      <PostWorkoutForm
+        onCancel={() => setGView("coach-detail")}
+        onPosted={async () => { await openCoachDetail(selectedGroup); }}
+        groupId={selectedGroup.id}
+      />
+    );
+  }
+
+  // ── Results for one posted workout (coach) ──
+  if (gView === "results" && selectedWorkout) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(selectedWorkout.title, () => selectedGroup && openCoachDetail(selectedGroup))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <p className="text-sm" style={{ color: C.mut }}>{results.length} of {memberCount} member{memberCount === 1 ? "" : "s"} completed</p>
+          {!results.length ? (
+            <EmptyState icon={<Users size={28} />} title="No results yet" body="Nobody on the team has logged this workout yet." />
+          ) : results.map(r => (
+            <Card key={r.id}>
+              <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Member {r.user_id.slice(0, 8)}</p>
+              {r.exercises.map((ex, i) => (
+                <div key={i} className="text-xs mb-1" style={{ color: C.sec }}>
+                  {ex.name}: {ex.sets.filter(s => s.done).map(s => `${s.w ?? "-"}×${s.r ?? "-"}`).join(", ") || "no sets logged"}
+                </div>
+              ))}
+              <p className="text-xs mt-1" style={{ color: C.mut }}>{new Date(r.completed_at).toLocaleDateString()}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── A posted workout, from a member's side ──
+  if (gView === "member-workout" && selectedWorkout) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(selectedWorkout.title, () => setGView("member-detail"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          {selectedWorkout.notes && <p className="text-sm mb-2" style={{ color: C.sec }}>{selectedWorkout.notes}</p>}
+          {selectedWorkout.exercises.map((ex, i) => {
+            const targets = exerciseTargets(ex.name);
+            return (
+              <Card key={i}>
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>{ex.name}</p>
+                {targets && <p className="text-xs mt-0.5" style={{ color: C.accent }}>Targets: {targets}</p>}
+                <p className="text-xs mt-1" style={{ color: C.mut }}>{ex.sets} sets × {ex.reps} reps{ex.weight ? ` @ ${ex.weight}` : ""}</p>
+              </Card>
+            );
+          })}
+          {myResult ? (
+            <div className="mt-2 p-4 rounded-2xl" style={{ background: C.accentSoft }}>
+              <p className="text-sm font-semibold" style={{ color: C.accent }}>You already logged this one — {new Date(myResult.completed_at).toLocaleDateString()}</p>
+            </div>
+          ) : (
+            <Btn full onClick={() => setGView("active")}>Start this workout</Btn>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── A coach's group detail ──
+  if (gView === "coach-detail" && selectedGroup) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(selectedGroup.name, () => setGView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Card>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: C.mut }}>Invite code</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xl font-bold font-mono" style={{ color: C.pri }}>{selectedGroup.invite_code}</p>
+              <button onClick={() => navigator.clipboard.writeText(selectedGroup.invite_code || "")}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: C.border, color: C.sec }}>Copy</button>
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.mut }}>{memberCount} member{memberCount === 1 ? "" : "s"} joined</p>
+          </Card>
+          <Btn full onClick={() => setGView("post-workout")}>Post a workout</Btn>
+          <SectionLabel className="mt-2">Posted workouts</SectionLabel>
+          {!groupWorkouts.length ? (
+            <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Post your first workout for the team to follow." />
+          ) : groupWorkouts.map(w => (
+            <Card key={w.id} onClick={() => openResults(w)}>
+              <p className="text-sm font-semibold" style={{ color: C.pri }}>{w.title}</p>
+              <p className="text-xs mt-0.5" style={{ color: C.mut }}>{w.exercises.length} exercises · posted {new Date(w.posted_at).toLocaleDateString()}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── A member's group detail ──
+  if (gView === "member-detail" && selectedGroup) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(selectedGroup.name, () => setGView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          {!groupWorkouts.length ? (
+            <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Your coach hasn't posted a workout to this group yet." />
+          ) : groupWorkouts.map(w => (
+            <Card key={w.id} onClick={() => openMemberWorkout(w)}>
+              <p className="text-sm font-semibold" style={{ color: C.pri }}>{w.title}</p>
+              <p className="text-xs mt-0.5" style={{ color: C.mut }}>{w.exercises.length} exercises · posted {new Date(w.posted_at).toLocaleDateString()}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Create a group ──
+  if (gView === "create") {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Create a group", () => { setGView("list"); setCreatedCode(null); })}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          {createdCode ? (
+            <Card>
+              <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Group created</p>
+              <p className="text-xs mb-3" style={{ color: C.mut }}>Share this code with your team so they can join:</p>
+              <p className="text-2xl font-bold font-mono text-center py-3" style={{ color: C.accent }}>{createdCode}</p>
+              <Btn full onClick={() => { setCreatedCode(null); setGView("list"); }}>Done</Btn>
+            </Card>
+          ) : (
+            <>
+              <Input label="Group name" value={nameInput} onChange={setNameInput} placeholder="e.g. Morning Crew" />
+              {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+              <Btn full disabled={loading} onClick={handleCreate}>{loading ? "Creating…" : "Create group"}</Btn>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Join a group ──
+  if (gView === "join") {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Join a group", () => setGView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Input label="Invite code" value={codeInput} onChange={v => setCodeInput(v.toUpperCase())} placeholder="e.g. K7M2QP" />
+          {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+          <Btn full disabled={loading} onClick={handleJoin}>{loading ? "Joining…" : "Join group"}</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List (default) ──
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      {backHeader("Groups", onBack)}
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <div className="grid grid-cols-2 gap-3">
+          <Btn variant="secondary" onClick={() => setGView("create")}>Create a group</Btn>
+          <Btn variant="secondary" onClick={() => setGView("join")}>Join a group</Btn>
+        </div>
+
+        {coachedGroups.length > 0 && (
+          <>
+            <SectionLabel className="mt-2">Groups you coach</SectionLabel>
+            {coachedGroups.map(g => (
+              <Card key={g.id} onClick={() => openCoachDetail(g)}>
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>{g.name}</p>
+                <p className="text-xs mt-0.5" style={{ color: C.mut }}>Code: {g.invite_code}</p>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {memberGroups.length > 0 && (
+          <>
+            <SectionLabel className="mt-2">Groups you're in</SectionLabel>
+            {memberGroups.map(g => (
+              <Card key={g.id} onClick={() => openMemberDetail(g)}>
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>{g.name}</p>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {!loading && !coachedGroups.length && !memberGroups.length && (
+          <EmptyState icon={<Users size={28} />} title="No groups yet" body="Create a group to coach others, or join one with an invite code." />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Posting a workout reuses the exact same exercise-picker UI as building a
+// custom workout, just posting to a group instead of starting immediately.
+function PostWorkoutForm({ groupId, onCancel, onPosted }: { groupId: string; onCancel: () => void; onPosted: () => void }) {
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+  const [built, setBuilt] = useState<Exercise[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [error, setError] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  function addEx(name: string) {
+    setBuilt(b => [...b, { name, sets: 3, reps: "10", weight: "" }]);
+    setShowPicker(false);
+  }
+  function updateEx(i: number, patch: Partial<Exercise>) {
+    setBuilt(b => b.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+  }
+  function removeEx(i: number) {
+    setBuilt(b => b.filter((_, idx) => idx !== i));
+  }
+
+  async function handlePost() {
+    if (!title.trim()) { setError("Give this workout a name"); return; }
+    if (!built.length) { setError("Add at least one exercise"); return; }
+    setError(""); setPosting(true);
+    const { error: err } = await postWorkoutToGroup(groupId, title.trim(), built, notes.trim() || undefined);
+    setPosting(false);
+    if (err) { setError(err); return; }
+    onPosted();
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+        <button onClick={onCancel} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+          <ChevronLeft size={18} />
+        </button>
+        <h2 className="text-lg font-bold" style={{ color: C.pri }}>Post a workout</h2>
+      </div>
+
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <Input label="Title" value={title} onChange={setTitle} placeholder="e.g. Monday Push Day" />
+        <Input label="Notes (optional)" value={notes} onChange={setNotes} placeholder="Anything the team should know" />
+
+        {!built.length ? (
+          <EmptyState icon={<Dumbbell size={28} />} title="No exercises added" body="Search the exercise library and add movements one at a time." action="Add exercise" onAction={() => setShowPicker(true)} />
+        ) : (
+          <>
+            {built.map((ex, i) => {
+              const targets = exerciseTargets(ex.name);
+              return (
+                <Card key={i}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>{ex.name}</p>
+                      {targets && <p className="text-xs mt-0.5" style={{ color: C.accent }}>Targets: {targets}</p>}
+                    </div>
+                    <button onClick={() => removeEx(i)} aria-label={`Remove ${ex.name}`} className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: C.surfaceAlt, color: C.err }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input label="Sets" value={String(ex.sets)} onChange={v => updateEx(i, { sets: parseInt(v) || 0 })} />
+                    <Input label="Reps" value={ex.reps} onChange={v => updateEx(i, { reps: v })} />
+                    <Input label="Weight" value={ex.weight || ""} onChange={v => updateEx(i, { weight: v })} />
+                  </div>
+                </Card>
+              );
+            })}
+            <Btn variant="secondary" full onClick={() => setShowPicker(true)}>Add another exercise</Btn>
+          </>
+        )}
+
+        {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+        <Btn full disabled={posting} onClick={handlePost}>{posting ? "Posting…" : "Post to group"}</Btn>
+      </div>
+
+      {showPicker && <ExercisePicker onPick={addEx} onClose={() => setShowPicker(false)} />}
+    </div>
+  );
+}
+
 function WorkoutScreen({
   activePlan, onSetActivePlan, onPlanChanged, initialView, onConsumedInitialView,
 }: {
@@ -1318,6 +1727,10 @@ function WorkoutScreen({
         onCancel={() => setView("overview")}
       />
     );
+  }
+
+  if (view === "groups") {
+    return <GroupsSection onBack={() => setView("overview")} />;
   }
 
   if (showActive && todayDay && todayDay.exercises && activePlan) {
@@ -1574,11 +1987,18 @@ function WorkoutScreen({
     <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
       <div className="flex items-center justify-between px-5 pt-14 pb-5">
         <h1 className="text-2xl font-bold" style={{ color: C.pri }}>Workout</h1>
-        <button onClick={() => setView("plans")}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border"
-          style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
-          <Calendar size={15} /> Plans
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setView("groups")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border"
+            style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
+            <Users size={15} /> Groups
+          </button>
+          <button onClick={() => setView("plans")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border"
+            style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
+            <Calendar size={15} /> Plans
+          </button>
+        </div>
       </div>
 
       {toast && (
