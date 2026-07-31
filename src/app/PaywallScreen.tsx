@@ -9,6 +9,11 @@ export default function PaywallScreen({ status }: { status: SubscriptionStatus }
   const [error, setError] = useState<string | null>(null);
 
   const isReturning = status === "canceled" || status === "past_due" || status === "incomplete";
+  // Just came back from Stripe Checkout — useSubscription is actively
+  // polling for the webhook to finish (see lib/subscription.ts). Showing the
+  // normal "start your free trial" pitch here would be actively confusing
+  // right after someone already did exactly that.
+  const justCheckedOut = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("checkout") === "success";
 
   async function handleStart() {
     setError(null);
@@ -20,6 +25,17 @@ export default function PaywallScreen({ status }: { status: SubscriptionStatus }
     }
     // On success, startCheckout() redirects the whole page to Stripe —
     // nothing left to do here.
+  }
+
+  if (justCheckedOut) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center gap-3" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        <h1 className="text-xl font-bold" style={{ color: C.pri }}>Confirming your subscription…</h1>
+        <p className="text-sm max-w-xs" style={{ color: C.mut }}>
+          This usually takes just a few seconds. Hang tight — no need to try checkout again.
+        </p>
+      </div>
+    );
   }
 
   return (

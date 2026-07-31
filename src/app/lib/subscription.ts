@@ -31,29 +31,57 @@ export function useSubscription(userId: string | null): SubscriptionInfo {
     }
     let cancelled = false
 
-    async function load() {
+    async function load(): Promise<SubscriptionStatus> {
       const { data } = await supabase!
         .from('profiles')
         .select('subscription_status, trial_ends_at, subscription_current_period_end')
         .eq('id', userId)
         .maybeSingle()
-      if (cancelled) return
+      if (cancelled) return 'none'
+      const status = (data?.subscription_status as SubscriptionStatus) ?? 'none'
       setInfo({
-        status: (data?.subscription_status as SubscriptionStatus) ?? 'none',
+        status,
         trialEndsAt: data?.trial_ends_at ?? null,
         currentPeriodEnd: data?.subscription_current_period_end ?? null,
         loading: false,
       })
+      return status
     }
     load()
 
-    // Refresh when returning to the tab (e.g. after completing Stripe
-    // Checkout in the same browser and getting redirected back).
+    // Just returned from a successful Stripe Checkout: the webhook that
+    // actually records this in the database fires asynchronously, on
+    // Stripe's own timing — there's no guarantee it's finished before this
+    // page loads and does its one-shot check above. Relying on that single
+    // check (or on visibilitychange, which only fires if the user happens to
+    // switch tabs) meant someone could land on the paywall right after truly
+    // paying, with no way to know it would resolve itself. This polls for a
+    // real window instead, so "just subscribed" reliably unlocks the app
+    // without depending on an incidental tab-switch to notice.
+    const justCheckedOut = new URLSearchParams(window.location.search).get('checkout') === 'success'
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    if (justCheckedOut) {
+      let attempts = 0
+      pollTimer = setInterval(async () => {
+        attempts++
+        const status = await load()
+        if (cancelled || hasActiveAccess(status) || attempts >= 10) {
+          if (pollTimer) clearInterval(pollTimer)
+          // Clean the URL so refreshing later doesn't re-trigger polling.
+          window.history.replaceState({}, '', window.location.pathname)
+        }
+      }, 1500); // 10 attempts × 1.5s = up to 15s of polling
+    }
+
     function onVisible() {
       if (document.visibilityState === 'visible') load()
     }
     document.addEventListener('visibilitychange', onVisible)
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible) }
+    return () => {
+      cancelled = true
+      if (pollTimer) clearInterval(pollTimer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [userId])
 
   return info
