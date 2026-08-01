@@ -163,7 +163,7 @@ export function runMigrations() {
 const DEFAULT_CFG: Config = {
   name: '', waterUnit: 'oz', waterGoal: 64, weightUnit: 'lbs',
   activity: 1.55, activityLabel: 'Moderate',
-  notifications: { all: true, workout: true, meal: false, weekly: true },
+  notifications: { all: true, workout: true, meal: false, weekly: true, groupPosts: true },
   metricUnits: false, reducedMotion: false,
 }
 

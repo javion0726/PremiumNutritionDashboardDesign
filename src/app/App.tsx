@@ -43,7 +43,7 @@ import {
   joinGroupByCode, postWorkoutToGroup, getGroupWorkouts, logGroupWorkoutResult,
   getGroupWorkoutResults, getMyResultForWorkout, leaveGroup, deleteGroup,
   updateGroupWorkout, deleteGroupWorkout,
-  subscribeToGroupWorkouts, subscribeToGroupWorkoutResults,
+  subscribeToGroupWorkouts, subscribeToGroupWorkoutResults, subscribeToAnyGroupWorkoutPosted,
   type Group, type GroupWorkout, type GroupWorkoutLog,
 } from "./lib/groups";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -1241,7 +1241,6 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [codeInput, setCodeInput] = useState("");
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<GroupWorkout | null>(null);
-  const [liveToast, setLiveToast] = useState("");
 
   async function loadList() {
     setLoading(true);
@@ -1255,21 +1254,16 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   // Live updates — while looking at a group's workout list (member or
   // coach) or a specific workout's results (coach), new data appears within
   // a second or two on its own, no need to leave and come back to refresh.
+  // (The "new workout posted" notification itself is now handled app-wide,
+  // in AppShell, so it also fires outside this screen — this effect only
+  // needs to keep the visible list itself current.)
   useEffect(() => {
     const isCoachView = gView === "coach-detail";
     const isMemberView = gView === "member-detail";
     if ((!isCoachView && !isMemberView) || !selectedGroup) return;
-    const unsubscribe = subscribeToGroupWorkouts(selectedGroup.id, (payload) => {
+    const unsubscribe = subscribeToGroupWorkouts(selectedGroup.id, () => {
       if (isCoachView) getGroupMembers(selectedGroup.id).then(m => setMemberCount(m.filter(x => x.role === 'member').length));
       getGroupWorkouts(selectedGroup.id).then(setGroupWorkouts);
-      // Realtime only ever fires for events after the subscription is
-      // already connected — never for the existing data you loaded when you
-      // first opened the screen — so it's safe to notify on every INSERT
-      // without any extra "is this the first load" tracking.
-      if (isMemberView && payload.eventType === "INSERT") {
-        setLiveToast("New workout posted");
-        setTimeout(() => setLiveToast(""), 2500);
-      }
     });
     return unsubscribe;
   }, [gView, selectedGroup?.id]);
@@ -1467,11 +1461,6 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedGroup.name, () => setGView("list"))}
-        {liveToast && (
-          <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl text-sm font-medium text-center" style={{ background: C.accentSoft, color: C.accent }}>
-            {liveToast}
-          </div>
-        )}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           <Card>
             <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: C.mut }}>Invite code</p>
@@ -1514,11 +1503,6 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedGroup.name, () => setGView("list"))}
-        {liveToast && (
-          <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl text-sm font-medium text-center" style={{ background: C.accentSoft, color: C.accent }}>
-            {liveToast}
-          </div>
-        )}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Your coach hasn't posted a workout to this group yet." />
@@ -3379,6 +3363,7 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
     { key: "meal", label: "Nutrition check-in", sub: "At 12:00 PM" },
     { key: "weekly", label: "Weekly summary", sub: "Every Sunday" },
     { key: "milestones", label: "Goal milestones", sub: "When you hit a target" },
+    { key: "groupPosts", label: "Group workout posts", sub: "When your coach posts a new workout" },
   ];
 
   return (
@@ -3780,6 +3765,23 @@ function AppShell() {
   const [profileAutoOpenCalc, setProfileAutoOpenCalc] = useState(false);
   const [activePlan, setActivePlanState] = useState<ActivePlan | null>(() => getActivePlan());
   const [workoutInitialView, setWorkoutInitialView] = useState<WorkoutView | undefined>(undefined);
+  const [globalToast, setGlobalToast] = useState("");
+
+  // App-wide notification for a newly-posted group workout — runs regardless
+  // of which tab is active, not just while looking at the Groups screen.
+  // Respects the Settings toggle (Notifications > Group workout posts) —
+  // checked live at the moment a workout arrives, not just once when this
+  // subscribes, so turning it off while the app is already open takes
+  // effect immediately rather than needing a reload.
+  useEffect(() => {
+    const unsubscribe = subscribeToAnyGroupWorkoutPosted((workout) => {
+      const cfg = getConfig();
+      if (cfg.notifications?.groupPosts === false) return;
+      setGlobalToast(`New workout posted: ${workout.title}`);
+      setTimeout(() => setGlobalToast(""), 3000);
+    });
+    return unsubscribe;
+  }, []);
 
   function setActivePlan(p: ActivePlan | null) {
     saveActivePlan(p);
@@ -3805,6 +3807,16 @@ function AppShell() {
 
   return (
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "Inter, sans-serif", position: "relative" }}>
+      {globalToast && (
+        <div style={{
+          position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: "50%", transform: "translateX(-50%)",
+          maxWidth: 390, width: "calc(100% - 32px)", zIndex: 9999,
+          background: C.accent, color: C.accentFg, borderRadius: 14, padding: "12px 16px",
+          fontSize: 14, fontWeight: 600, textAlign: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+        }}>
+          {globalToast}
+        </div>
+      )}
       {showProfile && (
         <ProfileScreen
           onClose={() => { setShowProfile(false); setProfileAutoOpenCalc(false); }}

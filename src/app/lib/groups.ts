@@ -189,4 +189,24 @@ export function subscribeToGroupWorkoutResults(groupWorkoutId: string, onChange:
   return () => { supabase!.removeChannel(channel) }
 }
 
+// App-wide version of the above — not scoped to one specific group, so this
+// can run for as long as the user is signed in, regardless of which screen
+// they're on, and still only receives INSERT events for groups they're
+// actually a coach or member of. This relies on the same RLS-respecting
+// behavior confirmed above; it's the INSERT case specifically (not DELETE)
+// so the standard RLS filtering applies with no extra replica identity setup
+// needed here.
+export function subscribeToAnyGroupWorkoutPosted(onNewWorkout: (workout: GroupWorkout) => void): () => void {
+  if (!supabase) return () => {}
+  const channel = supabase
+    .channel('any-group-workout-posted')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'group_workouts' }, (payload) => {
+      onNewWorkout(payload.new as GroupWorkout)
+    })
+    .subscribe((status, err) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.error('[realtime] app-wide group_workouts subscription failed:', status, err)
+    })
+  return () => { supabase!.removeChannel(channel) }
+}
+
 export { isSupabaseConfigured }
