@@ -148,4 +148,30 @@ export async function leaveGroup(groupId: string): Promise<{ error?: string }> {
   return {}
 }
 
+// True live updates, not polling — a member watching their group screen
+// sees a newly-posted workout appear within a second or two, no need to
+// leave and come back. Realtime respects the same RLS policies as every
+// other read in this app (confirmed against current Supabase docs before
+// building this): a subscriber only ever receives events for rows they
+// could already SELECT, so this introduces no new access than what already
+// exists. Requires SUPABASE_REALTIME_GROUPS.sql to have been run once.
+
+export function subscribeToGroupWorkouts(groupId: string, onChange: () => void): () => void {
+  if (!supabase) return () => {}
+  const channel = supabase
+    .channel(`group-workouts-${groupId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'group_workouts', filter: `group_id=eq.${groupId}` }, onChange)
+    .subscribe()
+  return () => { supabase!.removeChannel(channel) }
+}
+
+export function subscribeToGroupWorkoutResults(groupWorkoutId: string, onChange: () => void): () => void {
+  if (!supabase) return () => {}
+  const channel = supabase
+    .channel(`group-workout-results-${groupWorkoutId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'group_workout_logs', filter: `group_workout_id=eq.${groupWorkoutId}` }, onChange)
+    .subscribe()
+  return () => { supabase!.removeChannel(channel) }
+}
+
 export { isSupabaseConfigured }

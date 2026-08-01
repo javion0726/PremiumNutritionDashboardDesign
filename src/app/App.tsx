@@ -43,6 +43,7 @@ import {
   joinGroupByCode, postWorkoutToGroup, getGroupWorkouts, logGroupWorkoutResult,
   getGroupWorkoutResults, getMyResultForWorkout, leaveGroup,
   updateGroupWorkout, deleteGroupWorkout,
+  subscribeToGroupWorkouts, subscribeToGroupWorkoutResults,
   type Group, type GroupWorkout, type GroupWorkoutLog,
 } from "./lib/groups";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -1249,6 +1250,25 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     setLoading(false);
   }
   useEffect(() => { loadList(); }, []);
+
+  // Live updates — while looking at a group's workout list (member) or a
+  // specific workout's results (coach), new data appears within a second or
+  // two on its own, no need to leave and come back to refresh.
+  useEffect(() => {
+    if (gView !== "member-detail" || !selectedGroup) return;
+    const unsubscribe = subscribeToGroupWorkouts(selectedGroup.id, () => {
+      getGroupWorkouts(selectedGroup.id).then(setGroupWorkouts);
+    });
+    return unsubscribe;
+  }, [gView, selectedGroup?.id]);
+
+  useEffect(() => {
+    if (gView !== "results" || !selectedWorkout) return;
+    const unsubscribe = subscribeToGroupWorkoutResults(selectedWorkout.id, () => {
+      getGroupWorkoutResults(selectedWorkout.id).then(setResults);
+    });
+    return unsubscribe;
+  }, [gView, selectedWorkout?.id]);
 
   async function openCoachDetail(g: Group) {
     setSelectedGroup(g);
