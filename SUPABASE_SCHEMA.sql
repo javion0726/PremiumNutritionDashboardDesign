@@ -165,17 +165,61 @@ create policy "own saved_plans" on saved_plans for all using (auth.uid() = user_
 create policy "own migration_status" on migration_status for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Groups: a coach manages their own groups; members can see groups they belong to.
+--
+-- The two SELECT policies below (on groups and group_members) each need to
+-- check the OTHER table — a member's group visibility depends on
+-- group_members, and a membership row's visibility depends on groups. A
+-- direct subquery in each policy creates a circular reference that Postgres
+-- detects and refuses to run ("infinite recursion detected in policy").
+-- These SECURITY DEFINER functions break that cycle by running with
+-- privileges that bypass RLS on the table being checked. They're written as
+-- `language plpgsql` specifically — Postgres can silently inline simple
+-- `language sql` functions during query planning, which throws away the
+-- SECURITY DEFINER bypass and brings the recursion back even though the
+-- function looks correct. plpgsql functions are never inlined.
+create or replace function is_group_member(check_group_id uuid, check_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+stable
+set search_path = public
+as $$
+begin
+  return exists (
+    select 1 from group_members
+    where group_id = check_group_id and user_id = check_user_id
+  );
+end;
+$$;
+
+create or replace function is_group_coach(check_group_id uuid, check_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+stable
+set search_path = public
+as $$
+begin
+  return exists (
+    select 1 from groups
+    where id = check_group_id and coach_user_id = check_user_id
+  );
+end;
+$$;
+
 create policy "coach manages own groups" on groups for all
   using (auth.uid() = coach_user_id) with check (auth.uid() = coach_user_id);
 create policy "members can view their groups" on groups for select
-  using (exists (select 1 from group_members m where m.group_id = groups.id and m.user_id = auth.uid()));
+  using (is_group_member(id, auth.uid()));
 
 create policy "members can view their own membership rows" on group_members for select
-  using (user_id = auth.uid() or exists (select 1 from groups g where g.id = group_members.group_id and g.coach_user_id = auth.uid()));
+  using (user_id = auth.uid() or is_group_coach(group_id, auth.uid()));
 create policy "coach manages membership" on group_members for insert
-  with check (exists (select 1 from groups g where g.id = group_members.group_id and g.coach_user_id = auth.uid()));
+  with check (is_group_coach(group_id, auth.uid()));
 create policy "coach removes membership" on group_members for delete
-  using (exists (select 1 from groups g where g.id = group_members.group_id and g.coach_user_id = auth.uid()));
+  using (is_group_coach(group_id, auth.uid()));
+create policy "members can leave a group" on group_members for delete
+  using (user_id = auth.uid());
 
 -- Auto-create a profiles row the moment someone signs up, so the app never
 -- has to handle "authenticated but no profile row exists yet" as a state.
