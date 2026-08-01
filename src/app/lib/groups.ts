@@ -125,4 +125,27 @@ export async function getMyResultForWorkout(groupWorkoutId: string): Promise<Gro
   return data as GroupWorkoutLog | null
 }
 
+export async function updateGroupWorkout(workoutId: string, title: string, exercises: Exercise[], notes?: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('group_workouts').update({ title, exercises, notes: notes || null }).eq('id', workoutId)
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function deleteGroupWorkout(workoutId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('group_workouts').delete().eq('id', workoutId)
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function leaveGroup(groupId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'You need to be signed in.' }
+  const { error } = await supabase.from('group_members').delete().eq('group_id', groupId).eq('user_id', user.id)
+  if (error) return { error: error.message }
+  return {}
+}
+
 export { isSupabaseConfigured }

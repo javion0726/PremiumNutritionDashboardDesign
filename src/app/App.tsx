@@ -41,7 +41,8 @@ import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import {
   createGroup, getMyCoachedGroups, getMyMemberGroups, getGroupMembers,
   joinGroupByCode, postWorkoutToGroup, getGroupWorkouts, logGroupWorkoutResult,
-  getGroupWorkoutResults, getMyResultForWorkout,
+  getGroupWorkoutResults, getMyResultForWorkout, leaveGroup,
+  updateGroupWorkout, deleteGroupWorkout,
   type Group, type GroupWorkout, type GroupWorkoutLog,
 } from "./lib/groups";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -1238,6 +1239,7 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [nameInput, setNameInput] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [createdCode, setCreatedCode] = useState<string | null>(null);
+  const [editingWorkout, setEditingWorkout] = useState<GroupWorkout | null>(null);
 
   async function loadList() {
     setLoading(true);
@@ -1345,9 +1347,22 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   if (gView === "post-workout" && selectedGroup) {
     return (
       <PostWorkoutForm
-        onCancel={() => setGView("coach-detail")}
-        onPosted={async () => { await openCoachDetail(selectedGroup); }}
+        onCancel={() => { setEditingWorkout(null); setGView(editingWorkout ? "results" : "coach-detail"); }}
+        onPosted={async () => {
+          const wasEditing = editingWorkout;
+          setEditingWorkout(null);
+          if (wasEditing) {
+            const updated = await getGroupWorkouts(selectedGroup.id);
+            setGroupWorkouts(updated);
+            const fresh = updated.find(w => w.id === wasEditing.id);
+            if (fresh) { setSelectedWorkout(fresh); await openResults(fresh); }
+            else setGView("coach-detail");
+          } else {
+            await openCoachDetail(selectedGroup);
+          }
+        }}
         groupId={selectedGroup.id}
+        editingWorkout={editingWorkout ?? undefined}
       />
     );
   }
@@ -1358,6 +1373,15 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedWorkout.title, () => selectedGroup && openCoachDetail(selectedGroup))}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <div className="flex gap-2">
+            <Btn variant="secondary" full onClick={() => { setEditingWorkout(selectedWorkout); setGView("post-workout"); }}>Edit</Btn>
+            <Btn variant="secondary" full onClick={async () => {
+              if (!confirm(`Delete "${selectedWorkout.title}"? This can't be undone.`)) return;
+              const { error: err } = await deleteGroupWorkout(selectedWorkout.id);
+              if (err) { alert(err); return; }
+              if (selectedGroup) await openCoachDetail(selectedGroup);
+            }}>Delete</Btn>
+          </div>
           <p className="text-sm" style={{ color: C.mut }}>{results.length} of {memberCount} member{memberCount === 1 ? "" : "s"} completed</p>
           {!results.length ? (
             <EmptyState icon={<Users size={28} />} title="No results yet" body="Nobody on the team has logged this workout yet." />
@@ -1421,7 +1445,7 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
             </div>
             <p className="text-xs mt-2" style={{ color: C.mut }}>{memberCount} member{memberCount === 1 ? "" : "s"} joined</p>
           </Card>
-          <Btn full onClick={() => setGView("post-workout")}>Post a workout</Btn>
+          <Btn full onClick={() => { setEditingWorkout(null); setGView("post-workout"); }}>Post a workout</Btn>
           <SectionLabel className="mt-2">Posted workouts</SectionLabel>
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Post your first workout for the team to follow." />
@@ -1450,6 +1474,18 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
               <p className="text-xs mt-0.5" style={{ color: C.mut }}>{w.exercises.length} exercises · posted {new Date(w.posted_at).toLocaleDateString()}</p>
             </Card>
           ))}
+          <button
+            onClick={async () => {
+              if (!confirm(`Leave "${selectedGroup.name}"? You'll need a new invite code to rejoin.`)) return;
+              const { error: err } = await leaveGroup(selectedGroup.id);
+              if (err) { alert(err); return; }
+              setGView("list");
+              await loadList();
+            }}
+            className="mt-2 text-sm font-semibold text-center"
+            style={{ color: C.err }}>
+            Leave group
+          </button>
         </div>
       </div>
     );
@@ -1537,10 +1573,10 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
 
 // Posting a workout reuses the exact same exercise-picker UI as building a
 // custom workout, just posting to a group instead of starting immediately.
-function PostWorkoutForm({ groupId, onCancel, onPosted }: { groupId: string; onCancel: () => void; onPosted: () => void }) {
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [built, setBuilt] = useState<Exercise[]>([]);
+function PostWorkoutForm({ groupId, onCancel, onPosted, editingWorkout }: { groupId: string; onCancel: () => void; onPosted: () => void; editingWorkout?: GroupWorkout }) {
+  const [title, setTitle] = useState(editingWorkout?.title ?? "");
+  const [notes, setNotes] = useState(editingWorkout?.notes ?? "");
+  const [built, setBuilt] = useState<Exercise[]>(editingWorkout?.exercises ?? []);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
   const [posting, setPosting] = useState(false);
@@ -1560,7 +1596,9 @@ function PostWorkoutForm({ groupId, onCancel, onPosted }: { groupId: string; onC
     if (!title.trim()) { setError("Give this workout a name"); return; }
     if (!built.length) { setError("Add at least one exercise"); return; }
     setError(""); setPosting(true);
-    const { error: err } = await postWorkoutToGroup(groupId, title.trim(), built, notes.trim() || undefined);
+    const { error: err } = editingWorkout
+      ? await updateGroupWorkout(editingWorkout.id, title.trim(), built, notes.trim() || undefined)
+      : await postWorkoutToGroup(groupId, title.trim(), built, notes.trim() || undefined);
     setPosting(false);
     if (err) { setError(err); return; }
     onPosted();
@@ -1572,7 +1610,7 @@ function PostWorkoutForm({ groupId, onCancel, onPosted }: { groupId: string; onC
         <button onClick={onCancel} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
           <ChevronLeft size={18} />
         </button>
-        <h2 className="text-lg font-bold" style={{ color: C.pri }}>Post a workout</h2>
+        <h2 className="text-lg font-bold" style={{ color: C.pri }}>{editingWorkout ? "Edit workout" : "Post a workout"}</h2>
       </div>
 
       <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
@@ -1609,7 +1647,7 @@ function PostWorkoutForm({ groupId, onCancel, onPosted }: { groupId: string; onC
         )}
 
         {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
-        <Btn full disabled={posting} onClick={handlePost}>{posting ? "Posting…" : "Post to group"}</Btn>
+        <Btn full disabled={posting} onClick={handlePost}>{posting ? (editingWorkout ? "Saving…" : "Posting…") : (editingWorkout ? "Save changes" : "Post to group")}</Btn>
       </div>
 
       {showPicker && <ExercisePicker onPick={addEx} onClose={() => setShowPicker(false)} />}
