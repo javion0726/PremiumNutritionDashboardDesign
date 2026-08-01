@@ -41,7 +41,7 @@ import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import {
   createGroup, getMyCoachedGroups, getMyMemberGroups, getGroupMembers,
   joinGroupByCode, postWorkoutToGroup, getGroupWorkouts, logGroupWorkoutResult,
-  getGroupWorkoutResults, getMyResultForWorkout, leaveGroup,
+  getGroupWorkoutResults, getMyResultForWorkout, leaveGroup, deleteGroup,
   updateGroupWorkout, deleteGroupWorkout,
   subscribeToGroupWorkouts, subscribeToGroupWorkoutResults,
   type Group, type GroupWorkout, type GroupWorkoutLog,
@@ -1241,6 +1241,7 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [codeInput, setCodeInput] = useState("");
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<GroupWorkout | null>(null);
+  const [liveToast, setLiveToast] = useState("");
 
   async function loadList() {
     setLoading(true);
@@ -1251,13 +1252,24 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   }
   useEffect(() => { loadList(); }, []);
 
-  // Live updates — while looking at a group's workout list (member) or a
-  // specific workout's results (coach), new data appears within a second or
-  // two on its own, no need to leave and come back to refresh.
+  // Live updates — while looking at a group's workout list (member or
+  // coach) or a specific workout's results (coach), new data appears within
+  // a second or two on its own, no need to leave and come back to refresh.
   useEffect(() => {
-    if (gView !== "member-detail" || !selectedGroup) return;
-    const unsubscribe = subscribeToGroupWorkouts(selectedGroup.id, () => {
+    const isCoachView = gView === "coach-detail";
+    const isMemberView = gView === "member-detail";
+    if ((!isCoachView && !isMemberView) || !selectedGroup) return;
+    const unsubscribe = subscribeToGroupWorkouts(selectedGroup.id, (payload) => {
+      if (isCoachView) getGroupMembers(selectedGroup.id).then(m => setMemberCount(m.filter(x => x.role === 'member').length));
       getGroupWorkouts(selectedGroup.id).then(setGroupWorkouts);
+      // Realtime only ever fires for events after the subscription is
+      // already connected — never for the existing data you loaded when you
+      // first opened the screen — so it's safe to notify on every INSERT
+      // without any extra "is this the first load" tracking.
+      if (isMemberView && payload.eventType === "INSERT") {
+        setLiveToast("New workout posted");
+        setTimeout(() => setLiveToast(""), 2500);
+      }
     });
     return unsubscribe;
   }, [gView, selectedGroup?.id]);
@@ -1455,6 +1467,11 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedGroup.name, () => setGView("list"))}
+        {liveToast && (
+          <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl text-sm font-medium text-center" style={{ background: C.accentSoft, color: C.accent }}>
+            {liveToast}
+          </div>
+        )}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           <Card>
             <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: C.mut }}>Invite code</p>
@@ -1475,6 +1492,18 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
               <p className="text-xs mt-0.5" style={{ color: C.mut }}>{w.exercises.length} exercises · posted {new Date(w.posted_at).toLocaleDateString()}</p>
             </Card>
           ))}
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete "${selectedGroup.name}"? This permanently deletes the group, every posted workout, and every member's results for it. This can't be undone.`)) return;
+              const { error: err } = await deleteGroup(selectedGroup.id);
+              if (err) { alert(err); return; }
+              setGView("list");
+              await loadList();
+            }}
+            className="mt-2 text-sm font-semibold text-center"
+            style={{ color: C.err }}>
+            Delete group
+          </button>
         </div>
       </div>
     );
@@ -1485,6 +1514,11 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     return (
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedGroup.name, () => setGView("list"))}
+        {liveToast && (
+          <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl text-sm font-medium text-center" style={{ background: C.accentSoft, color: C.accent }}>
+            {liveToast}
+          </div>
+        )}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Your coach hasn't posted a workout to this group yet." />

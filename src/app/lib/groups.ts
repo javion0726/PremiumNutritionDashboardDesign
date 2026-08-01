@@ -139,6 +139,13 @@ export async function deleteGroupWorkout(workoutId: string): Promise<{ error?: s
   return {}
 }
 
+export async function deleteGroup(groupId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('groups').delete().eq('id', groupId)
+  if (error) return { error: error.message }
+  return {}
+}
+
 export async function leaveGroup(groupId: string): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
   const { data: { user } } = await supabase.auth.getUser()
@@ -156,7 +163,7 @@ export async function leaveGroup(groupId: string): Promise<{ error?: string }> {
 // could already SELECT, so this introduces no new access than what already
 // exists. Requires SUPABASE_REALTIME_GROUPS.sql to have been run once.
 
-export function subscribeToGroupWorkouts(groupId: string, onChange: () => void): () => void {
+export function subscribeToGroupWorkouts(groupId: string, onChange: (payload: { eventType: 'INSERT' | 'UPDATE' | 'DELETE' }) => void): () => void {
   if (!supabase) return () => {}
   const channel = supabase
     .channel(`group-workouts-${groupId}`)
