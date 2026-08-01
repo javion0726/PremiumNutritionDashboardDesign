@@ -161,7 +161,12 @@ export function subscribeToGroupWorkouts(groupId: string, onChange: () => void):
   const channel = supabase
     .channel(`group-workouts-${groupId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'group_workouts', filter: `group_id=eq.${groupId}` }, onChange)
-    .subscribe()
+    .subscribe((status, err) => {
+      // Previously silent either way — now logs so a connection problem is
+      // visible (in the browser console) instead of just quietly not updating.
+      if (status === 'SUBSCRIBED') console.log('[realtime] connected: group_workouts for', groupId)
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.error('[realtime] group_workouts subscription failed:', status, err)
+    })
   return () => { supabase!.removeChannel(channel) }
 }
 
@@ -170,7 +175,10 @@ export function subscribeToGroupWorkoutResults(groupWorkoutId: string, onChange:
   const channel = supabase
     .channel(`group-workout-results-${groupWorkoutId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'group_workout_logs', filter: `group_workout_id=eq.${groupWorkoutId}` }, onChange)
-    .subscribe()
+    .subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') console.log('[realtime] connected: group_workout_logs for', groupWorkoutId)
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.error('[realtime] group_workout_logs subscription failed:', status, err)
+    })
   return () => { supabase!.removeChannel(channel) }
 }
 
