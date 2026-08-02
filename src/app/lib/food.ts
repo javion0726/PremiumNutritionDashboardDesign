@@ -62,6 +62,23 @@ async function fetchOFF(q: string): Promise<FoodResult[]> {
     }))
 }
 
+export async function fetchByBarcode(barcode: string): Promise<FoodResult | null> {
+  const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json`)
+  if (!res.ok) throw new Error('Open Food Facts barcode lookup error')
+  const data = await res.json()
+  if (data.status !== 1 || !data.product) return null
+  const p = data.product as OffProduct & { product_name?: string }
+  if (!p.product_name || !p.nutriments) return null
+  return {
+    name: p.product_name, brand: p.brands ? p.brands.split(',')[0].trim() : '',
+    cal: Math.round(p.nutriments['energy-kcal_100g'] || 0),
+    prot: Math.round((p.nutriments['proteins_100g'] || 0) * 10) / 10,
+    carb: Math.round((p.nutriments['carbohydrates_100g'] || 0) * 10) / 10,
+    fat: Math.round((p.nutriments['fat_100g'] || 0) * 10) / 10,
+    per: 'per 100g',
+  }
+}
+
 export async function searchFood(q: string): Promise<{ items: FoodResult[]; allFailed: boolean }> {
   const [usda, off] = await Promise.allSettled([fetchUSDA(q), fetchOFF(q)])
   const items = [

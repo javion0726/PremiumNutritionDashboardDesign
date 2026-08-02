@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar, Share2, Smartphone, Quote, Users,
+  Timer, Calendar, Share2, Smartphone, Quote, Users, Camera,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -35,7 +35,9 @@ import {
   bestSets, strengthHistory, consistencyGrid, advancePlanDay, resolveGoalCurrent,
   recoveryScore, workoutStats, getBlockForWeek, getWeekInBlock, progressedWeight,
 } from "./lib/engine";
-import { searchFood, type FoodResult } from "./lib/food";
+import { searchFood, fetchByBarcode, type FoodResult } from "./lib/food";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import type { IScannerControls } from "@zxing/browser";
 import { EX } from "./lib/exercises";
 import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import {
@@ -50,6 +52,7 @@ import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
 import { useSubscription, hasActiveAccess, openBillingPortal } from "./lib/subscription";
 import AuthScreen from "./AuthScreen";
+import WelcomeScreen from "./WelcomeScreen";
 import PaywallScreen from "./PaywallScreen";
 
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
@@ -2205,6 +2208,58 @@ function WorkoutScreen({
 
 const MEAL_SLOTS = ["Breakfast", "Lunch", "Snack", "Dinner"];
 
+// Real barcode scanning, not the browser-native BarcodeDetector API — that
+// API doesn't exist at all in Safari on iPhone (an Apple policy decision,
+// not a bug that might get fixed), which would mean silently not working
+// for a real portion of users. ZXing decodes camera frames itself in JS, so
+// it works the same way on Android and iPhone.
+function BarcodeScannerModal({ onDetected, onClose }: { onDetected: (barcode: string) => void; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState("");
+  useLockBodyScroll();
+
+  useEffect(() => {
+    const reader = new BrowserMultiFormatReader();
+    let controls: IScannerControls | null = null;
+    let cancelled = false;
+    let detected = false;
+
+    reader.decodeFromVideoDevice(undefined, videoRef.current ?? undefined, (result, err, ctrls) => {
+      controls = ctrls;
+      if (cancelled || detected) return;
+      if (result) {
+        detected = true;
+        ctrls.stop();
+        onDetected(result.getText());
+      }
+      // A "not found" result fires continuously while no barcode is in
+      // frame yet — that's completely normal while aiming the camera, not
+      // an actual error, so it's not surfaced here.
+    }).catch(() => {
+      if (!cancelled) setError("Camera access was denied or is unavailable.");
+    });
+
+    return () => { cancelled = true; controls?.stop(); };
+  }, [onDetected]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center" style={{ background: "#000" }}>
+      <video ref={videoRef} className="w-full max-w-md rounded-2xl" style={{ background: "#111" }} muted playsInline />
+      {error ? (
+        <p className="text-sm mt-4 px-6 text-center" style={{ color: "#fff" }}>{error}</p>
+      ) : (
+        <p className="text-sm mt-4" style={{ color: "#94A3B8" }}>Point your camera at a barcode</p>
+      )}
+      <button onClick={onClose}
+        className="mt-5 px-7 py-3 rounded-xl text-sm font-bold"
+        style={{ background: "#1E293B", color: "#fff" }}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+
 function LogMealSheet({ onClose }: { onClose: () => void }) {
   const [type, setType] = useState("Snack");
   const [query, setQuery] = useState("");
@@ -2215,6 +2270,8 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
   const [grams, setGrams] = useState("100");
   const [manual, setManual] = useState(false);
   const [m, setM] = useState({ name: "", cal: "", prot: "", carb: "", fat: "" });
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanError, setScanError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -2241,6 +2298,17 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
     const g = parseFloat(grams) || 100;
     const f = g / 100;
     commit(Math.round(picked.cal * f), Math.round(picked.prot * f * 10) / 10, Math.round(picked.carb * f * 10) / 10, Math.round(picked.fat * f * 10) / 10, `${picked.name}${picked.brand ? ` · ${picked.brand}` : ""} (${g}g)`);
+  }
+  async function handleBarcodeDetected(barcode: string) {
+    setShowScanner(false);
+    setScanError("");
+    try {
+      const item = await fetchByBarcode(barcode);
+      if (!item) { setScanError("No product found for that barcode — try searching by name instead."); return; }
+      setPicked(item);
+    } catch {
+      setScanError("Couldn't look up that barcode — check your connection.");
+    }
   }
   function saveManual() {
     if (!m.name.trim() && !m.cal) return;
@@ -2281,7 +2349,15 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
 
         {!manual ? (
           <>
-            <input placeholder="Search foods (e.g. chicken breast)…" value={query} onChange={e => setQuery(e.target.value)} style={input} />
+            <div className="flex items-center gap-2">
+              <input placeholder="Search foods (e.g. chicken breast)…" value={query} onChange={e => setQuery(e.target.value)} style={{ ...input, flex: 1 }} />
+              <button onClick={() => { setScanError(""); setShowScanner(true); }} aria-label="Scan a barcode"
+                className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0"
+                style={{ borderColor: C.border, background: C.surface, color: C.sec }}>
+                <Camera size={18} />
+              </button>
+            </div>
+            {scanError && <p className="text-sm" style={{ color: C.err }}>{scanError}</p>}
             {picked ? (
               <div className="rounded-2xl p-4 border" style={{ background: C.surface, borderColor: C.accent }}>
                 <p className="text-sm font-semibold" style={{ color: C.pri }}>{picked.name}{picked.brand ? ` · ${picked.brand}` : ""}</p>
@@ -2326,6 +2402,12 @@ function LogMealSheet({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
+      {showScanner && (
+        <BarcodeScannerModal
+          onDetected={handleBarcodeDetected}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
     </div>
   );
 }
@@ -3717,6 +3799,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [adopting, setAdopting] = useState(false);
   const [adoptionDoneFor, setAdoptionDoneFor] = useState<string | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
   const subscription = useSubscription(user?.id ?? null);
 
   useEffect(() => {
@@ -3739,9 +3823,19 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (!isSupabaseConfigured) return <>{children}</>;
   if (loading) return <LoadingScreen />;
   if (!user) {
+    if (!showAuth) {
+      return (
+        <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh" }}>
+          <WelcomeScreen
+            onGetStarted={() => { setAuthMode("sign-up"); setShowAuth(true); }}
+            onLogIn={() => { setAuthMode("sign-in"); setShowAuth(true); }}
+          />
+        </div>
+      );
+    }
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh" }}>
-        <AuthScreen />
+        <AuthScreen initialMode={authMode} />
       </div>
     );
   }

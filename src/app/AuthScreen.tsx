@@ -5,8 +5,8 @@ import { isSupabaseConfigured } from "./lib/supabase";
 
 type Mode = "sign-in" | "sign-up" | "forgot";
 
-export default function AuthScreen() {
-  const [mode, setMode] = useState<Mode>("sign-in");
+export default function AuthScreen({ initialMode = "sign-in" }: { initialMode?: Mode }) {
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
