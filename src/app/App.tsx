@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar, Share2, Smartphone, Quote, Users, Camera,
+  Timer, Calendar, Share2, Smartphone, Quote, Users, Camera, BookOpen,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -50,6 +50,11 @@ import {
   searchPublicGroups, getPublicGroupMemberCount, joinPublicGroup,
   type Group, type GroupWorkout, type GroupWorkoutLog, type CoachProfile,
 } from "./lib/groups";
+import {
+  createProgram, getMyPrograms, updateProgramStatus, getChapters,
+  createChapter, deleteChapter, requestVideoUploadUrl,
+  type Program, type ProgramChapter,
+} from "./lib/programs";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
 import { useSubscription, hasActiveAccess, openBillingPortal } from "./lib/subscription";
@@ -160,7 +165,7 @@ function exerciseTargets(name: string): string | null {
 import { C, Btn, Input, Card, SectionLabel } from "./ui";
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
-type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups";
+type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups" | "programs";
 type DisplayState = "populated" | "empty" | "loading" | "error";
 
 function ProgressBar({ value, max = 100, color = C.accent, height = 6 }: { value: number; max?: number; color?: string; height?: number }) {
@@ -1861,6 +1866,208 @@ function PostWorkoutForm({ groupId, onCancel, onPosted, editingWorkout }: { grou
   );
 }
 
+// ─── Coach Programs (multi-chapter, video-based, paid content) ─────────────
+// Phase 1 scope: create/manage programs and chapters, upload video via Mux.
+// Purchase flow and gated playback are the next phase — see
+// SUPABASE_PROGRAMS_SCHEMA.sql for the full reasoning. Draft programs are
+// only ever visible to their own coach; nothing here is purchasable yet.
+type ProgramsView = "list" | "create" | "detail" | "add-chapter";
+
+function ProgramsSection({ onBack }: { onBack: () => void }) {
+  const [pView, setPView] = useState<ProgramsView>("list");
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
+  const [chapters, setChapters] = useState<ProgramChapter[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [titleInput, setTitleInput] = useState("");
+  const [descInput, setDescInput] = useState("");
+  const [priceInput, setPriceInput] = useState("");
+  const [chapterTitleInput, setChapterTitleInput] = useState("");
+  const [uploadingChapterId, setUploadingChapterId] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  async function loadPrograms() {
+    setLoading(true);
+    setPrograms(await getMyPrograms());
+    setLoading(false);
+  }
+  useEffect(() => { loadPrograms(); }, []);
+
+  async function openProgram(p: Program) {
+    setSelectedProgram(p);
+    setLoading(true);
+    setChapters(await getChapters(p.id));
+    setLoading(false);
+    setPView("detail");
+  }
+
+  async function handleCreate() {
+    if (!titleInput.trim()) { setError("Enter a program title"); return; }
+    const priceCents = Math.round((parseFloat(priceInput) || 0) * 100);
+    setError(""); setLoading(true);
+    const { program, error: err } = await createProgram(titleInput.trim(), descInput.trim(), priceCents);
+    setLoading(false);
+    if (err) { setError(err); return; }
+    setTitleInput(""); setDescInput(""); setPriceInput("");
+    await loadPrograms();
+    await openProgram(program!);
+  }
+
+  async function handleAddChapter() {
+    if (!selectedProgram) return;
+    if (!chapterTitleInput.trim()) { setError("Enter a chapter title"); return; }
+    setError(""); setLoading(true);
+    const { chapter, error: err } = await createChapter(selectedProgram.id, chapterTitleInput.trim(), chapters.length);
+    setLoading(false);
+    if (err) { setError(err); return; }
+    setChapterTitleInput("");
+    setChapters(c => [...c, chapter!]);
+    setPView("detail");
+  }
+
+  async function handleUploadVideo(chapterId: string, file: File) {
+    setError("");
+    const { uploadUrl, error: err } = await requestVideoUploadUrl(chapterId);
+    if (err || !uploadUrl) { setError(err || "Could not start upload"); return; }
+    setUploadingChapterId(chapterId);
+    setUploadProgress(0);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', uploadUrl);
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100)); };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error('Upload failed'));
+        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.send(file);
+      });
+      setChapters(cs => cs.map(c => c.id === chapterId ? { ...c, video_status: 'pending' as const, mux_upload_id: 'uploaded' } : c));
+    } catch {
+      setError("Video upload failed — check your connection and try again.");
+    }
+    setUploadingChapterId(null);
+  }
+
+  const backHeader = (title: string, onBackClick: () => void) => (
+    <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+      <button onClick={onBackClick} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+        <ChevronLeft size={18} />
+      </button>
+      <h2 className="text-lg font-bold" style={{ color: C.pri }}>{title}</h2>
+    </div>
+  );
+
+  // ── Program detail: chapters, publish toggle ──
+  if (pView === "detail" && selectedProgram) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(selectedProgram.title, () => setPView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Card>
+            {selectedProgram.description && <p className="text-sm mb-2" style={{ color: C.sec }}>{selectedProgram.description}</p>}
+            <p className="text-lg font-bold" style={{ color: C.pri }}>${(selectedProgram.price_cents / 100).toFixed(2)}</p>
+            <p className="text-xs mt-1" style={{ color: C.mut }}>
+              {selectedProgram.status === 'published' ? 'Published — visible in Discover' : 'Draft — only visible to you'}
+            </p>
+          </Card>
+          <button
+            onClick={async () => {
+              const next = selectedProgram.status === 'published' ? 'draft' : 'published';
+              const { error: err } = await updateProgramStatus(selectedProgram.id, next);
+              if (err) { alert(err); return; }
+              setSelectedProgram({ ...selectedProgram, status: next });
+              await loadPrograms();
+            }}
+            className="flex items-center justify-between p-3 rounded-2xl border"
+            style={{ borderColor: C.border, background: C.surface }}>
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>{selectedProgram.status === 'published' ? 'Unpublish' : 'Publish'}</p>
+            <ChevronRight size={16} style={{ color: C.mut }} />
+          </button>
+
+          <SectionLabel className="mt-2">Chapters</SectionLabel>
+          {!chapters.length ? (
+            <EmptyState icon={<BookOpen size={28} />} title="No chapters yet" body="Add your first chapter and upload a video." />
+          ) : chapters.map((c, i) => (
+            <Card key={c.id}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>{i + 1}. {c.title}</p>
+                  <p className="text-xs mt-0.5" style={{ color: c.video_status === 'ready' ? C.accent : c.video_status === 'error' ? C.err : C.mut }}>
+                    {c.video_status === 'ready' ? 'Video ready' : c.video_status === 'error' ? 'Upload failed — try again' : c.mux_upload_id ? 'Processing…' : 'No video yet'}
+                  </p>
+                </div>
+                <button onClick={async () => { if (confirm(`Delete chapter "${c.title}"?`)) { await deleteChapter(c.id); setChapters(cs => cs.filter(x => x.id !== c.id)); } }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: C.surfaceAlt, color: C.err }}>
+                  <X size={14} />
+                </button>
+              </div>
+              {c.video_status !== 'ready' && (
+                <label className="mt-2 block">
+                  <input type="file" accept="video/*" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadVideo(c.id, f); }} />
+                  <div className="text-center text-sm font-semibold py-2.5 rounded-xl border cursor-pointer" style={{ borderColor: C.border, color: C.accent }}>
+                    {uploadingChapterId === c.id ? `Uploading… ${uploadProgress}%` : 'Upload video'}
+                  </div>
+                </label>
+              )}
+            </Card>
+          ))}
+          {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+          <Btn full onClick={() => setPView("add-chapter")}>Add a chapter</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Add a chapter ──
+  if (pView === "add-chapter" && selectedProgram) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Add a chapter", () => setPView("detail"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Input label="Chapter title" value={chapterTitleInput} onChange={setChapterTitleInput} placeholder="e.g. Week 1: Foundations" />
+          {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+          <Btn full disabled={loading} onClick={handleAddChapter}>{loading ? "Adding…" : "Add chapter"}</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Create a program ──
+  if (pView === "create") {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Create a program", () => setPView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Input label="Title" value={titleInput} onChange={setTitleInput} placeholder="e.g. 8-Week Strength Foundation" />
+          <Input label="Description" value={descInput} onChange={setDescInput} placeholder="What's this program about?" />
+          <Input label="Price (USD)" value={priceInput} onChange={setPriceInput} placeholder="29.00" />
+          {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+          <Btn full disabled={loading} onClick={handleCreate}>{loading ? "Creating…" : "Create program"}</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List (default) ──
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      {backHeader("Programs", onBack)}
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <Btn full onClick={() => setPView("create")}>Create a program</Btn>
+        {!loading && !programs.length ? (
+          <EmptyState icon={<BookOpen size={28} />} title="No programs yet" body="Create a multi-chapter program with video content to sell." />
+        ) : programs.map(p => (
+          <Card key={p.id} onClick={() => openProgram(p)}>
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>{p.title}</p>
+            <p className="text-xs mt-0.5" style={{ color: C.mut }}>${(p.price_cents / 100).toFixed(2)} · {p.status === 'published' ? 'Published' : 'Draft'}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function WorkoutScreen({
   activePlan, onSetActivePlan, onPlanChanged, initialView, onConsumedInitialView,
 }: {
@@ -1975,6 +2182,10 @@ function WorkoutScreen({
 
   if (view === "groups") {
     return <GroupsSection onBack={() => setView("overview")} />;
+  }
+
+  if (view === "programs") {
+    return <ProgramsSection onBack={() => setView("overview")} />;
   }
 
   if (showActive && todayDay && todayDay.exercises && activePlan) {
@@ -2231,16 +2442,21 @@ function WorkoutScreen({
     <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
       <div className="flex items-center justify-between px-5 pt-14 pb-5">
         <h1 className="text-2xl font-bold" style={{ color: C.pri }}>Workout</h1>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setView("groups")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border"
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setView("programs")}
+            className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold border"
             style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
-            <Users size={15} /> Groups
+            <BookOpen size={14} /> Programs
+          </button>
+          <button onClick={() => setView("groups")}
+            className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold border"
+            style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
+            <Users size={14} /> Groups
           </button>
           <button onClick={() => setView("plans")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border"
+            className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold border"
             style={{ borderColor: C.border, color: C.sec, background: C.surface }}>
-            <Calendar size={15} /> Plans
+            <Calendar size={14} /> Plans
           </button>
         </div>
       </div>

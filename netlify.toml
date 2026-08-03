@@ -11,7 +11,9 @@
   # though it built successfully and is a real, installed dependency. Marking
   # it external tells Netlify to include the actual node_modules/stripe
   # folder alongside the function instead of trying to inline it.
-  external_node_modules = ["stripe"]
+  # @mux/mux-node is added proactively here for the same reason, before ever
+  # hitting the same error in production.
+  external_node_modules = ["stripe", "@mux/mux-node"]
 
 # The service worker must never be long-cached, or users get stuck on old builds.
 [[headers]]
