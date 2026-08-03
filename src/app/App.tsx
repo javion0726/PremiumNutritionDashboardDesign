@@ -46,7 +46,9 @@ import {
   getGroupWorkoutResults, getMyResultForWorkout, leaveGroup, deleteGroup,
   updateGroupWorkout, deleteGroupWorkout,
   subscribeToGroupWorkouts, subscribeToGroupWorkoutResults, subscribeToAnyGroupWorkoutPosted,
-  type Group, type GroupWorkout, type GroupWorkoutLog,
+  setGroupPublic, getMyCoachProfile, getCoachProfile, saveCoachProfile,
+  searchPublicGroups, getPublicGroupMemberCount, joinPublicGroup,
+  type Group, type GroupWorkout, type GroupWorkoutLog, type CoachProfile,
 } from "./lib/groups";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
@@ -1226,7 +1228,7 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
 // same way they'd log any other workout — ActiveSessionView itself is
 // reused unmodified; this only reads back what it already saved to log a
 // copy against the group workout too.
-type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active";
+type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active" | "discover" | "coach-profile-edit";
 
 function GroupsSection({ onBack }: { onBack: () => void }) {
   const [gView, setGView] = useState<GroupsView>("list");
@@ -1244,15 +1246,49 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [codeInput, setCodeInput] = useState("");
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<GroupWorkout | null>(null);
+  const [publicGroups, setPublicGroups] = useState<Group[]>([]);
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverCounts, setDiscoverCounts] = useState<Record<string, number>>({});
+  const [myCoachProfile, setMyCoachProfile] = useState<CoachProfile | null>(null);
+  const [viewingCoachProfile, setViewingCoachProfile] = useState<CoachProfile | null>(null);
+  const [makePublicOnCreate, setMakePublicOnCreate] = useState(false);
+  const [profileNameInput, setProfileNameInput] = useState("");
+  const [profileBioInput, setProfileBioInput] = useState("");
+  const [discoverJoining, setDiscoverJoining] = useState<string | null>(null);
 
   async function loadList() {
     setLoading(true);
-    const [coached, member] = await Promise.all([getMyCoachedGroups(), getMyMemberGroups()]);
+    const [coached, member, profile] = await Promise.all([getMyCoachedGroups(), getMyMemberGroups(), getMyCoachProfile()]);
     setCoachedGroups(coached);
     setMemberGroups(member);
+    setMyCoachProfile(profile);
     setLoading(false);
   }
   useEffect(() => { loadList(); }, []);
+
+  const [discoverCoachNames, setDiscoverCoachNames] = useState<Record<string, string>>({});
+
+  async function runDiscoverSearch(query: string) {
+    const results = await searchPublicGroups(query);
+    setPublicGroups(results);
+    const counts: Record<string, number> = {};
+    const names: Record<string, string> = {};
+    await Promise.all(results.map(async g => {
+      counts[g.id] = await getPublicGroupMemberCount(g.id);
+      const profile = await getCoachProfile(g.coach_user_id);
+      if (profile) names[g.id] = profile.display_name;
+    }));
+    setDiscoverCounts(counts);
+    setDiscoverCoachNames(names);
+  }
+  async function openDiscover() {
+    setGView("discover");
+    await runDiscoverSearch("");
+  }
+  async function openCoachProfileFor(userId: string) {
+    const profile = await getCoachProfile(userId);
+    setViewingCoachProfile(profile);
+  }
 
   // Live updates — while looking at a group's workout list (member or
   // coach) or a specific workout's results (coach), new data appears within
@@ -1315,8 +1351,16 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
 
   async function handleCreate() {
     if (!nameInput.trim()) { setError("Enter a group name"); return; }
+    if (makePublicOnCreate && !myCoachProfile && !profileNameInput.trim()) {
+      setError("Enter a display name — this is what members and browsers will see");
+      return;
+    }
     setError(""); setLoading(true);
-    const { group, error: err } = await createGroup(nameInput.trim());
+    if (makePublicOnCreate && !myCoachProfile) {
+      const { error: profileErr } = await saveCoachProfile(profileNameInput.trim(), profileBioInput.trim());
+      if (profileErr) { setLoading(false); setError(profileErr); return; }
+    }
+    const { group, error: err } = await createGroup(nameInput.trim(), makePublicOnCreate);
     setLoading(false);
     if (err) { setError(err); return; }
     setNameInput("");
@@ -1474,6 +1518,25 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
             </div>
             <p className="text-xs mt-2" style={{ color: C.mut }}>{memberCount} member{memberCount === 1 ? "" : "s"} joined</p>
           </Card>
+          <button
+            onClick={async () => {
+              const next = !selectedGroup.is_public;
+              if (next && !myCoachProfile) { setGView("coach-profile-edit"); return; }
+              const { error: err } = await setGroupPublic(selectedGroup.id, next);
+              if (err) { alert(err); return; }
+              setSelectedGroup({ ...selectedGroup, is_public: next });
+              await loadList();
+            }}
+            className="flex items-center justify-between p-3 rounded-2xl border"
+            style={{ borderColor: C.border, background: C.surface }}>
+            <div className="text-left">
+              <p className="text-sm font-semibold" style={{ color: C.pri }}>{selectedGroup.is_public ? "Public" : "Private"}</p>
+              <p className="text-xs mt-0.5" style={{ color: C.mut }}>{selectedGroup.is_public ? "Anyone can find this in Discover" : "Invite-only"}</p>
+            </div>
+            <div className="w-10 h-6 rounded-full relative flex-shrink-0" style={{ background: selectedGroup.is_public ? C.accent : C.border }}>
+              <div className="w-4 h-4 rounded-full absolute top-1 transition-all" style={{ left: selectedGroup.is_public ? 22 : 2, background: C.surface }} />
+            </div>
+          </button>
           <Btn full onClick={() => { setEditingWorkout(null); setGView("post-workout"); }}>Post a workout</Btn>
           <SectionLabel className="mt-2">Posted workouts</SectionLabel>
           {!groupWorkouts.length ? (
@@ -1548,11 +1611,112 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
           ) : (
             <>
               <Input label="Group name" value={nameInput} onChange={setNameInput} placeholder="e.g. Morning Crew" />
+
+              <button
+                onClick={() => setMakePublicOnCreate(v => !v)}
+                className="flex items-center justify-between p-3 rounded-2xl border"
+                style={{ borderColor: C.border, background: C.surface }}>
+                <div className="text-left">
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Make this group public</p>
+                  <p className="text-xs mt-0.5" style={{ color: C.mut }}>Anyone can find and join it in Discover — otherwise it's invite-only</p>
+                </div>
+                <div className="w-10 h-6 rounded-full relative flex-shrink-0" style={{ background: makePublicOnCreate ? C.accent : C.border }}>
+                  <div className="w-4 h-4 rounded-full absolute top-1 transition-all" style={{ left: makePublicOnCreate ? 22 : 2, background: C.surface }} />
+                </div>
+              </button>
+
+              {makePublicOnCreate && !myCoachProfile && (
+                <Card>
+                  <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Set up your coach profile</p>
+                  <p className="text-xs mb-3" style={{ color: C.mut }}>Shown to anyone who finds this group in Discover — you only need to do this once.</p>
+                  <div className="flex flex-col gap-3">
+                    <Input label="Display name" value={profileNameInput} onChange={setProfileNameInput} placeholder="e.g. Coach Jordan" />
+                    <Input label="Bio (optional)" value={profileBioInput} onChange={setProfileBioInput} placeholder="A line about your coaching style" />
+                  </div>
+                </Card>
+              )}
+
               {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
               <Btn full disabled={loading} onClick={handleCreate}>{loading ? "Creating…" : "Create group"}</Btn>
             </>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // ── Set up / edit coach profile (needed before a group can go public) ──
+  if (gView === "coach-profile-edit") {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Coach profile", () => setGView(selectedGroup ? "coach-detail" : "list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <p className="text-sm" style={{ color: C.mut }}>Shown to anyone who finds your group in Discover.</p>
+          <Input label="Display name" value={profileNameInput} onChange={setProfileNameInput} placeholder="e.g. Coach Jordan" />
+          <Input label="Bio (optional)" value={profileBioInput} onChange={setProfileBioInput} placeholder="A line about your coaching style" />
+          {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+          <Btn full disabled={loading} onClick={async () => {
+            if (!profileNameInput.trim()) { setError("Enter a display name"); return; }
+            setError(""); setLoading(true);
+            const { error: err } = await saveCoachProfile(profileNameInput.trim(), profileBioInput.trim());
+            setLoading(false);
+            if (err) { setError(err); return; }
+            const profile = await getMyCoachProfile();
+            setMyCoachProfile(profile);
+            if (selectedGroup) {
+              const { error: pubErr } = await setGroupPublic(selectedGroup.id, true);
+              if (!pubErr) setSelectedGroup({ ...selectedGroup, is_public: true });
+              await loadList();
+              setGView("coach-detail");
+            } else {
+              setGView("list");
+            }
+          }}>{loading ? "Saving…" : "Save"}</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Discover public groups ──
+  if (gView === "discover") {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Discover", () => setGView("list"))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Input value={discoverQuery} onChange={v => { setDiscoverQuery(v); runDiscoverSearch(v); }} placeholder="Search public groups…" />
+          {!publicGroups.length ? (
+            <EmptyState icon={<Users size={28} />} title="No public groups yet" body="Nobody has made a group public yet — check back later, or create your own." />
+          ) : publicGroups.map(g => (
+            <Card key={g.id}>
+              <p className="text-sm font-semibold" style={{ color: C.pri }}>{g.name}</p>
+              <p className="text-xs mt-0.5" style={{ color: C.mut }}>
+                {discoverCoachNames[g.id] ? `Coached by ${discoverCoachNames[g.id]}` : "Coach"} · {discoverCounts[g.id] ?? 0} member{(discoverCounts[g.id] ?? 0) === 1 ? "" : "s"}
+              </p>
+              <div className="flex gap-2 mt-3">
+                <Btn variant="secondary" full onClick={() => openCoachProfileFor(g.coach_user_id)}>View coach</Btn>
+                <Btn full disabled={discoverJoining === g.id} onClick={async () => {
+                  setDiscoverJoining(g.id);
+                  const { error: err } = await joinPublicGroup(g.id);
+                  setDiscoverJoining(null);
+                  if (err) { alert(err); return; }
+                  await loadList();
+                  setGView("list");
+                }}>{discoverJoining === g.id ? "Joining…" : "Join"}</Btn>
+              </div>
+            </Card>
+          ))}
+        </div>
+        {viewingCoachProfile && (
+          <div className="fixed inset-0 z-[70] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.4)" }} onClick={() => setViewingCoachProfile(null)}>
+            <div onClick={e => e.stopPropagation()} className="w-full max-w-md p-5 rounded-t-3xl" style={{ background: C.bg, paddingBottom: 32 }}>
+              <p className="text-lg font-bold" style={{ color: C.pri }}>{viewingCoachProfile.display_name}</p>
+              {viewingCoachProfile.bio && <p className="text-sm mt-2" style={{ color: C.sec }}>{viewingCoachProfile.bio}</p>}
+              <div className="mt-4">
+                <Btn full onClick={() => setViewingCoachProfile(null)}>Close</Btn>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1576,6 +1740,7 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
       {backHeader("Groups", onBack)}
       <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <Btn full onClick={openDiscover}>Discover public groups</Btn>
         <div className="grid grid-cols-2 gap-3">
           <Btn variant="secondary" onClick={() => setGView("create")}>Create a group</Btn>
           <Btn variant="secondary" onClick={() => setGView("join")}>Join a group</Btn>

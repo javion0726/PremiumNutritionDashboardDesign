@@ -8,7 +8,8 @@ import { supabase, isSupabaseConfigured } from './supabase'
 import type { Exercise } from './plans'
 import type { SetRow } from './store'
 
-export type Group = { id: string; name: string; coach_user_id: string; invite_code: string | null; created_at: string }
+export type Group = { id: string; name: string; coach_user_id: string; invite_code: string | null; is_public: boolean; created_at: string }
+export type CoachProfile = { user_id: string; display_name: string; bio: string | null; created_at: string; updated_at: string }
 export type GroupMember = { group_id: string; user_id: string; role: 'coach' | 'member'; joined_at: string }
 export type GroupWorkout = { id: string; group_id: string; posted_by: string; title: string; exercises: Exercise[]; notes: string | null; posted_at: string }
 export type GroupWorkoutResultEntry = { name: string; sets: SetRow[] }
@@ -23,18 +24,82 @@ function generateInviteCode(): string {
   return code
 }
 
-export async function createGroup(name: string): Promise<{ group?: Group; error?: string }> {
+export async function createGroup(name: string, isPublic = false): Promise<{ group?: Group; error?: string }> {
   if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'You need to be signed in to create a group.' }
   const invite_code = generateInviteCode()
   const { data, error } = await supabase
     .from('groups')
-    .insert({ name, coach_user_id: user.id, invite_code })
+    .insert({ name, coach_user_id: user.id, invite_code, is_public: isPublic })
     .select()
     .single()
   if (error) return { error: error.message }
   return { group: data as Group }
+}
+
+export async function joinPublicGroup(groupId: string): Promise<{ error?: string; groupName?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return { error: 'You need to be signed in to join a group.' }
+  try {
+    const res = await fetch('/.netlify/functions/join-public-group', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) return { error: body.error || 'Could not join that group.' }
+    return { groupName: body.groupName }
+  } catch {
+    return { error: "Couldn't reach the server — check your connection and try again." }
+  }
+}
+
+export async function setGroupPublic(groupId: string, isPublic: boolean): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('groups').update({ is_public: isPublic }).eq('id', groupId)
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function getMyCoachProfile(): Promise<CoachProfile | null> {
+  if (!supabase) return null
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await supabase.from('coach_profiles').select('*').eq('user_id', user.id).maybeSingle()
+  return data as CoachProfile | null
+}
+
+export async function getCoachProfile(userId: string): Promise<CoachProfile | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('coach_profiles').select('*').eq('user_id', userId).maybeSingle()
+  return data as CoachProfile | null
+}
+
+export async function saveCoachProfile(displayName: string, bio: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'You need to be signed in.' }
+  const { error } = await supabase.from('coach_profiles').upsert({
+    user_id: user.id, display_name: displayName, bio: bio || null, updated_at: new Date().toISOString(),
+  })
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function searchPublicGroups(query: string): Promise<Group[]> {
+  if (!supabase) return []
+  let q = supabase.from('groups').select('*').eq('is_public', true).order('created_at', { ascending: false }).limit(30)
+  if (query.trim()) q = q.ilike('name', `%${query.trim()}%`)
+  const { data } = await q
+  return (data as Group[]) || []
+}
+
+export async function getPublicGroupMemberCount(groupId: string): Promise<number> {
+  if (!supabase) return 0
+  const { data } = await supabase.rpc('get_public_group_member_count', { target_group_id: groupId })
+  return typeof data === 'number' ? data : 0
 }
 
 export async function getMyCoachedGroups(): Promise<Group[]> {
