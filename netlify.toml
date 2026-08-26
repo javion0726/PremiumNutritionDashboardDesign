@@ -5,15 +5,13 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
-  # stripe's package.json has export conditions that esbuild's automatic
-  # dependency bundling doesn't resolve correctly in Netlify's function
-  # runtime, causing "Cannot find package 'stripe'" at invoke time even
-  # though it built successfully and is a real, installed dependency. Marking
-  # it external tells Netlify to include the actual node_modules/stripe
-  # folder alongside the function instead of trying to inline it.
-  # @mux/mux-node is added proactively here for the same reason, before ever
-  # hitting the same error in production.
-  external_node_modules = ["stripe", "@mux/mux-node"]
+  # @mux/mux-node's package.json has export conditions that esbuild's
+  # automatic dependency bundling doesn't resolve correctly in Netlify's
+  # function runtime — this was discovered the hard way with the "stripe"
+  # package (since removed, along with the subscription/paywall feature it
+  # supported), and applied proactively here for @mux/mux-node before ever
+  # hitting the same "Cannot find package" error in production.
+  external_node_modules = ["@mux/mux-node"]
 
 # The service worker must never be long-cached, or users get stuck on old builds.
 [[headers]]

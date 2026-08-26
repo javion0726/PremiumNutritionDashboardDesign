@@ -10,7 +10,7 @@ import type { SetRow } from './store'
 
 export type Group = { id: string; name: string; coach_user_id: string; invite_code: string | null; is_public: boolean; created_at: string }
 export type CoachProfile = { user_id: string; display_name: string; bio: string | null; created_at: string; updated_at: string }
-export type GroupMember = { group_id: string; user_id: string; role: 'coach' | 'member'; joined_at: string }
+export type GroupMember = { group_id: string; user_id: string; role: 'coach' | 'moderator' | 'member'; joined_at: string }
 export type GroupWorkout = { id: string; group_id: string; posted_by: string; title: string; exercises: Exercise[]; notes: string | null; posted_at: string }
 export type GroupWorkoutResultEntry = { name: string; sets: SetRow[] }
 export type GroupWorkoutLog = { id: string; group_workout_id: string; user_id: string; exercises: GroupWorkoutResultEntry[]; completed_at: string }
@@ -125,6 +125,20 @@ export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
   if (!supabase) return []
   const { data } = await supabase.from('group_members').select('*').eq('group_id', groupId)
   return (data as GroupMember[]) || []
+}
+
+export async function setMemberRole(groupId: string, userId: string, role: 'moderator' | 'member'): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('group_members').update({ role }).eq('group_id', groupId).eq('user_id', userId)
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function removeMember(groupId: string, userId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId)
+  if (error) return { error: error.message }
+  return {}
 }
 
 export async function joinGroupByCode(inviteCode: string): Promise<{ error?: string; groupName?: string }> {

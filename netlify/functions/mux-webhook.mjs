@@ -1,6 +1,6 @@
 // Netlify Function: receives Mux's webhook when an uploaded video finishes
 // processing, and updates the corresponding program_chapters row. Verifies
-// the webhook signature the same way the Stripe webhook does — never trusts
+// the webhook signature — never trusts
 // an unverified request claiming to be from Mux.
 //
 // Required environment variables:
@@ -31,7 +31,7 @@ export default async (request) => {
   let event;
   try {
     // unwrap() verifies the signature AND parses the event in one step —
-    // must receive the raw, unparsed body, exactly like the Stripe webhook.
+    // must receive the raw, unparsed body for signature verification to work.
     event = mux.webhooks.unwrap(rawBody, request.headers);
   } catch (err) {
     console.error('mux-webhook: signature verification failed:', err.message);
@@ -61,7 +61,7 @@ export default async (request) => {
     // only the final ready/errored states matter for updating a chapter.
   } catch (err) {
     console.error('mux-webhook: failed handling', event.type, ':', err.message);
-    // Still return 200 — same reasoning as the Stripe webhook: a transient
+    // Still return 200 — a transient
     // internal error shouldn't make Mux endlessly retry a webhook that will
     // fail the same way every time regardless.
   }

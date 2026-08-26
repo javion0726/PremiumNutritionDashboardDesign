@@ -48,19 +48,27 @@ import {
   subscribeToGroupWorkouts, subscribeToGroupWorkoutResults, subscribeToAnyGroupWorkoutPosted,
   setGroupPublic, getMyCoachProfile, getCoachProfile, saveCoachProfile,
   searchPublicGroups, getPublicGroupMemberCount, joinPublicGroup,
-  type Group, type GroupWorkout, type GroupWorkoutLog, type CoachProfile,
+  setMemberRole, removeMember,
+  type Group, type GroupWorkout, type GroupWorkoutLog, type CoachProfile, type GroupMember,
 } from "./lib/groups";
 import {
   createProgram, getMyPrograms, updateProgramStatus, getChapters,
   createChapter, deleteChapter, requestVideoUploadUrl,
   type Program, type ProgramChapter,
 } from "./lib/programs";
+import {
+  getGroupPosts, createGroupPost, deleteGroupPost, subscribeToGroupPosts,
+  type GroupPost,
+} from "./lib/groupPosts";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { adoptLocalDataIfNeeded, setSyncUser } from "./lib/sync";
-import { useSubscription, hasActiveAccess, openBillingPortal } from "./lib/subscription";
+import {
+  getMyCoachStatus, amIAdmin, getMyApplication, submitCoachApplication,
+  getPendingApplications, reviewApplication,
+  type CoachStatus, type CoachApplication,
+} from "./lib/coaching";
 import AuthScreen from "./AuthScreen";
 import WelcomeScreen from "./WelcomeScreen";
-import PaywallScreen from "./PaywallScreen";
 
 // Old-schema data (from any previous Ascend deploy) is migrated before first render.
 runMigrations();
@@ -1233,9 +1241,112 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
 // same way they'd log any other workout — ActiveSessionView itself is
 // reused unmodified; this only reads back what it already saved to log a
 // copy against the group workout too.
-type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active" | "discover" | "coach-profile-edit";
+type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active" | "discover" | "coach-profile-edit" | "coach-gate" | "community" | "members";
+
+// ─── Coach verification gate ────────────────────────────────────────────────
+// Shared by both Groups and Programs creation flows — creating either
+// requires an approved coach application. Free participation (joining
+// groups, browsing, buying) is never gated by this; only the ability to
+// create/coach anything at all is.
+function CoachGate({ onApproved, onBack }: { onApproved: () => void; onBack: () => void }) {
+  const [status, setStatus] = useState<CoachStatus | null>(null);
+  const [application, setApplication] = useState<CoachApplication | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const [bioInput, setBioInput] = useState("");
+  const [yearsInput, setYearsInput] = useState("");
+  const [specialtiesInput, setSpecialtiesInput] = useState("");
+  const [certsInput, setCertsInput] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const s = await getMyCoachStatus();
+      setStatus(s);
+      if (s !== 'none') setApplication(await getMyApplication());
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (status === 'approved') onApproved();
+  }, [status]);
+
+  async function handleSubmit() {
+    if (!nameInput.trim()) { setError("Enter your full name"); return; }
+    if (!bioInput.trim()) { setError("Tell us about your fitness background"); return; }
+    setError(""); setSubmitting(true);
+    const { error: err } = await submitCoachApplication({
+      fullName: nameInput.trim(), bio: bioInput.trim(),
+      yearsExperience: yearsInput ? parseInt(yearsInput) : undefined,
+      specialties: specialtiesInput.trim(), certifications: certsInput.trim(),
+    });
+    setSubmitting(false);
+    if (err) { setError(err); return; }
+    setSubmitted(true);
+  }
+
+  const backHeader = (title: string) => (
+    <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+      <button onClick={onBack} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+        <ChevronLeft size={18} />
+      </button>
+      <h2 className="text-lg font-bold" style={{ color: C.pri }}>{title}</h2>
+    </div>
+  );
+
+  if (status === null) {
+    return <div className="flex flex-col min-h-screen" style={{ background: C.bg }}>{backHeader("Loading…")}</div>;
+  }
+
+  if (status === 'pending' || submitted) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Coach application")}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Card>
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>Application under review</p>
+            <p className="text-xs mt-1" style={{ color: C.mut }}>We'll let you know once it's been reviewed. Thanks for your patience.</p>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'rejected') {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Coach application")}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Card>
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>Application not approved</p>
+            {application?.reviewer_notes && <p className="text-xs mt-1" style={{ color: C.mut }}>{application.reviewer_notes}</p>}
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // status === 'none' — show the application form
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      {backHeader("Become a coach")}
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <p className="text-sm" style={{ color: C.mut }}>To keep the coach marketplace trustworthy, every coach is reviewed before they can create a group or publish a program.</p>
+        <Input label="Full name" value={nameInput} onChange={setNameInput} placeholder="Your name" />
+        <Input label="Fitness background" value={bioInput} onChange={setBioInput} placeholder="Your experience and training philosophy" />
+        <Input label="Years of experience" value={yearsInput} onChange={setYearsInput} placeholder="e.g. 5" />
+        <Input label="Specialties" value={specialtiesInput} onChange={setSpecialtiesInput} placeholder="e.g. Strength, weight loss" />
+        <Input label="Certifications (optional)" value={certsInput} onChange={setCertsInput} placeholder="e.g. NASM-CPT" />
+        {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+        <Btn full disabled={submitting} onClick={handleSubmit}>{submitting ? "Submitting…" : "Submit application"}</Btn>
+      </div>
+    </div>
+  );
+}
 
 function GroupsSection({ onBack }: { onBack: () => void }) {
+  const { user: currentUser } = useAuth();
   const [gView, setGView] = useState<GroupsView>("list");
   const [coachedGroups, setCoachedGroups] = useState<Group[]>([]);
   const [memberGroups, setMemberGroups] = useState<Group[]>([]);
@@ -1260,6 +1371,14 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [profileNameInput, setProfileNameInput] = useState("");
   const [profileBioInput, setProfileBioInput] = useState("");
   const [discoverJoining, setDiscoverJoining] = useState<string | null>(null);
+  const [groupPosts, setGroupPosts] = useState<GroupPost[]>([]);
+  const [postContent, setPostContent] = useState("");
+  const [postImageFile, setPostImageFile] = useState<File | null>(null);
+  const [postSubmitting, setPostSubmitting] = useState(false);
+  const [communityBackView, setCommunityBackView] = useState<"coach-detail" | "member-detail">("member-detail");
+  const [membersList, setMembersList] = useState<GroupMember[]>([]);
+  const [myRole, setMyRole] = useState<'coach' | 'moderator' | 'member' | null>(null);
+  const [membersActionId, setMembersActionId] = useState<string | null>(null);
 
   async function loadList() {
     setLoading(true);
@@ -1320,6 +1439,14 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     return unsubscribe;
   }, [gView, selectedWorkout?.id]);
 
+  useEffect(() => {
+    if (gView !== "community" || !selectedGroup) return;
+    const unsubscribe = subscribeToGroupPosts(selectedGroup.id, () => {
+      getGroupPosts(selectedGroup.id).then(setGroupPosts);
+    });
+    return unsubscribe;
+  }, [gView, selectedGroup?.id]);
+
   async function openCoachDetail(g: Group) {
     setSelectedGroup(g);
     setLoading(true);
@@ -1336,6 +1463,35 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     setGroupWorkouts(workouts);
     setLoading(false);
     setGView("member-detail");
+  }
+  async function openCommunity(g: Group, backTo: "coach-detail" | "member-detail") {
+    setSelectedGroup(g);
+    setCommunityBackView(backTo);
+    setLoading(true);
+    setGroupPosts(await getGroupPosts(g.id));
+    setLoading(false);
+    setGView("community");
+  }
+  async function openMembers(g: Group, backTo: "coach-detail" | "member-detail") {
+    setSelectedGroup(g);
+    setCommunityBackView(backTo);
+    setLoading(true);
+    const members = await getGroupMembers(g.id);
+    setMembersList(members);
+    const mine = members.find(m => m.user_id === currentUser?.id);
+    setMyRole(g.coach_user_id === currentUser?.id ? 'coach' : (mine?.role ?? null));
+    setLoading(false);
+    setGView("members");
+  }
+  async function handleCreatePost() {
+    if (!selectedGroup) return;
+    if (!postContent.trim() && !postImageFile) return;
+    setPostSubmitting(true);
+    const { error: err } = await createGroupPost(selectedGroup.id, postContent.trim(), postImageFile || undefined);
+    setPostSubmitting(false);
+    if (err) { alert(err); return; }
+    setPostContent(""); setPostImageFile(null);
+    setGroupPosts(await getGroupPosts(selectedGroup.id));
   }
   async function openResults(w: GroupWorkout) {
     setSelectedWorkout(w);
@@ -1407,6 +1563,11 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
       <h2 className="text-lg font-bold" style={{ color: C.pri }}>{title}</h2>
     </div>
   );
+
+  // ── Coach verification gate, shown before Create ──
+  if (gView === "coach-gate") {
+    return <CoachGate onApproved={() => setGView("create")} onBack={() => setGView("list")} />;
+  }
 
   // ── Active session for a posted group workout ──
   if (gView === "active" && selectedWorkout) {
@@ -1508,6 +1669,107 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
     );
   }
 
+  // ── Members: coach and moderators can manage the roster ──
+  if (gView === "members" && selectedGroup) {
+    const canManageRoles = myRole === 'coach';
+    const canRemove = myRole === 'coach' || myRole === 'moderator';
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader("Members", () => setGView(communityBackView))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          {!membersList.length ? (
+            <EmptyState icon={<Users size={28} />} title="No members yet" body="Share your invite code to get people in." />
+          ) : membersList.map(m => (
+            <Card key={m.user_id}>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Member {m.user_id.slice(0, 8)}</p>
+                  <p className="text-xs mt-0.5" style={{ color: m.role === 'moderator' ? C.accent : C.mut }}>
+                    {m.role === 'moderator' ? 'Moderator' : 'Member'}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  {canManageRoles && (
+                    <button
+                      disabled={membersActionId === m.user_id}
+                      onClick={async () => {
+                        setMembersActionId(m.user_id);
+                        const nextRole = m.role === 'moderator' ? 'member' : 'moderator';
+                        const { error: err } = await setMemberRole(selectedGroup.id, m.user_id, nextRole);
+                        setMembersActionId(null);
+                        if (err) { alert(err); return; }
+                        setMembersList(list => list.map(x => x.user_id === m.user_id ? { ...x, role: nextRole } : x));
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: C.border, color: C.sec }}>
+                      {m.role === 'moderator' ? 'Remove mod' : 'Make mod'}
+                    </button>
+                  )}
+                  {canRemove && (m.role === 'member' || myRole === 'coach') && (
+                    <button
+                      disabled={membersActionId === m.user_id}
+                      onClick={async () => {
+                        if (!confirm('Remove this person from the group?')) return;
+                        setMembersActionId(m.user_id);
+                        const { error: err } = await removeMember(selectedGroup.id, m.user_id);
+                        setMembersActionId(null);
+                        if (err) { alert(err); return; }
+                        setMembersList(list => list.filter(x => x.user_id !== m.user_id));
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: C.border, color: C.err }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Community: per-group posts, questions, photos ──
+  if (gView === "community" && selectedGroup) {
+    return (
+      <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        {backHeader(`${selectedGroup.name} — Community`, () => setGView(communityBackView))}
+        <div className="flex flex-col gap-3 px-5 pt-5 pb-4 border-b" style={{ borderColor: C.border }}>
+          <textarea
+            value={postContent}
+            onChange={e => setPostContent(e.target.value)}
+            placeholder="Share something with the group…"
+            className="w-full p-3 rounded-2xl border text-sm"
+            style={{ borderColor: C.border, background: C.surface, color: C.pri, minHeight: 72, resize: "none" }}
+          />
+          <div className="flex items-center gap-2">
+            <label className="flex-1">
+              <input type="file" accept="image/*" className="hidden" onChange={e => setPostImageFile(e.target.files?.[0] || null)} />
+              <div className="text-center text-sm font-semibold py-2.5 rounded-xl border cursor-pointer" style={{ borderColor: C.border, color: C.accent }}>
+                {postImageFile ? postImageFile.name : "Add a photo (optional)"}
+              </div>
+            </label>
+          </div>
+          <Btn full disabled={postSubmitting || (!postContent.trim() && !postImageFile)} onClick={handleCreatePost}>
+            {postSubmitting ? "Posting…" : "Post"}
+          </Btn>
+        </div>
+        <div className="flex flex-col gap-3 px-5 pt-4 pb-28 flex-1">
+          {!groupPosts.length ? (
+            <EmptyState icon={<Users size={28} />} title="No posts yet" body="Be the first to say something." />
+          ) : groupPosts.map(post => (
+            <Card key={post.id}>
+              {post.content && <p className="text-sm" style={{ color: C.pri }}>{post.content}</p>}
+              {post.image_url && (
+                <img src={post.image_url} alt="" className="w-full mt-2 rounded-xl" style={{ maxHeight: 320, objectFit: "cover" }} />
+              )}
+              <p className="text-xs mt-2" style={{ color: C.mut }}>{new Date(post.created_at).toLocaleString()}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // ── A coach's group detail ──
   if (gView === "coach-detail" && selectedGroup) {
     return (
@@ -1523,6 +1785,8 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
             </div>
             <p className="text-xs mt-2" style={{ color: C.mut }}>{memberCount} member{memberCount === 1 ? "" : "s"} joined</p>
           </Card>
+          <Btn full variant="secondary" onClick={() => openCommunity(selectedGroup, "coach-detail")}>Community</Btn>
+          <Btn full variant="secondary" onClick={() => openMembers(selectedGroup, "coach-detail")}>Manage members</Btn>
           <button
             onClick={async () => {
               const next = !selectedGroup.is_public;
@@ -1575,6 +1839,8 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader(selectedGroup.name, () => setGView("list"))}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+          <Btn full variant="secondary" onClick={() => openCommunity(selectedGroup, "member-detail")}>Community</Btn>
+          <Btn full variant="secondary" onClick={() => openMembers(selectedGroup, "member-detail")}>Members</Btn>
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Your coach hasn't posted a workout to this group yet." />
           ) : groupWorkouts.map(w => (
@@ -1871,7 +2137,7 @@ function PostWorkoutForm({ groupId, onCancel, onPosted, editingWorkout }: { grou
 // Purchase flow and gated playback are the next phase — see
 // SUPABASE_PROGRAMS_SCHEMA.sql for the full reasoning. Draft programs are
 // only ever visible to their own coach; nothing here is purchasable yet.
-type ProgramsView = "list" | "create" | "detail" | "add-chapter";
+type ProgramsView = "list" | "create" | "detail" | "add-chapter" | "coach-gate";
 
 function ProgramsSection({ onBack }: { onBack: () => void }) {
   const [pView, setPView] = useState<ProgramsView>("list");
@@ -1956,6 +2222,11 @@ function ProgramsSection({ onBack }: { onBack: () => void }) {
       <h2 className="text-lg font-bold" style={{ color: C.pri }}>{title}</h2>
     </div>
   );
+
+  // ── Coach verification gate, shown before Create ──
+  if (pView === "coach-gate") {
+    return <CoachGate onApproved={() => setPView("create")} onBack={() => setPView("list")} />;
+  }
 
   // ── Program detail: chapters, publish toggle ──
   if (pView === "detail" && selectedProgram) {
@@ -3755,6 +4026,58 @@ function CalculatorSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── Admin: review pending coach applications ───────────────────────────────
+// The server independently re-verifies is_admin on every review call — this
+// screen being reachable isn't itself a security boundary, the function is.
+function AdminReviewScreen({ onClose }: { onClose: () => void }) {
+  const [applications, setApplications] = useState<CoachApplication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setApplications(await getPendingApplications());
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function handleReview(id: string, decision: 'approved' | 'rejected') {
+    setReviewingId(id);
+    const { error } = await reviewApplication(id, decision);
+    setReviewingId(null);
+    if (error) { alert(error); return; }
+    await load();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+        <button onClick={onClose} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+          <ChevronLeft size={18} />
+        </button>
+        <h2 className="text-lg font-bold" style={{ color: C.pri }}>Coach applications</h2>
+      </div>
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1 overflow-y-auto">
+        {loading ? null : !applications.length ? (
+          <EmptyState icon={<Users size={28} />} title="No pending applications" body="You're all caught up." />
+        ) : applications.map(app => (
+          <Card key={app.id}>
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>{app.full_name}</p>
+            <p className="text-xs mt-1" style={{ color: C.sec }}>{app.bio}</p>
+            {app.years_experience != null && <p className="text-xs mt-1" style={{ color: C.mut }}>{app.years_experience} years experience</p>}
+            {app.specialties && <p className="text-xs mt-0.5" style={{ color: C.mut }}>Specialties: {app.specialties}</p>}
+            {app.certifications && <p className="text-xs mt-0.5" style={{ color: C.mut }}>Certifications: {app.certifications}</p>}
+            <div className="flex gap-2 mt-3">
+              <Btn full disabled={reviewingId === app.id} onClick={() => handleReview(app.id, 'rejected')} variant="secondary">Reject</Btn>
+              <Btn full disabled={reviewingId === app.id} onClick={() => handleReview(app.id, 'approved')}>Approve</Btn>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; autoOpenCalculator?: boolean }) {
   useAppData();
   const cfg = getConfig();
@@ -3762,10 +4085,12 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const goals = getGoals();
   const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
   const [showFAQ, setShowFAQ] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminReview, setShowAdminReview] = useState(false);
+  useEffect(() => { amIAdmin().then(setIsAdmin); }, []);
   const [showAbout, setShowAbout] = useState(false);
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -3956,21 +4281,6 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
                 </div>
                 <Divider />
                 <button
-                  onClick={async () => {
-                    setPortalLoading(true);
-                    const result = await openBillingPortal();
-                    if (result.error) { alert(result.error); setPortalLoading(false); }
-                  }}
-                  disabled={portalLoading}
-                  className="w-full flex items-center gap-3 px-4 py-3"
-                  style={{ background: C.surface, minHeight: 48, opacity: portalLoading ? 0.6 : 1 }}>
-                  <span className="text-sm flex-1 text-left" style={{ color: C.pri }}>
-                    {portalLoading ? "Opening…" : "Manage subscription"}
-                  </span>
-                  <ChevronRight size={16} style={{ color: C.mut }} />
-                </button>
-                <Divider />
-                <button
                   onClick={async () => { await signOut(); onClose(); }}
                   className="w-full flex items-center gap-3 px-4 py-3"
                   style={{ background: C.surface, minHeight: 48 }}>
@@ -4009,6 +4319,18 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
             </div>
           </div>
 
+          {isAdmin && (
+            <div>
+              <SectionLabel>Admin</SectionLabel>
+              <button onClick={() => setShowAdminReview(true)}
+                className="w-full flex items-center gap-3 px-4 py-3 mt-3 rounded-2xl border" style={{ borderColor: C.border, background: C.surface, minHeight: 48 }}>
+                <Users size={16} style={{ color: C.sec }} />
+                <span className="text-sm flex-1 text-left" style={{ color: C.pri }}>Review coach applications</span>
+                <ChevronRight size={16} style={{ color: C.mut }} />
+              </button>
+            </div>
+          )}
+
           <button onClick={doClear} disabled={deleting} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border" style={{ background: C.surface, borderColor: C.border, minHeight: 48, opacity: deleting ? 0.6 : 1 }}>
             <Shield size={16} style={{ color: C.err }} />
             <span className="text-sm font-semibold" style={{ color: C.err }}>
@@ -4025,6 +4347,7 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
 
       {showCalc && <CalculatorSheet onClose={() => setShowCalc(false)} />}
       {showFAQ && <FAQSheet onClose={() => setShowFAQ(false)} />}
+      {showAdminReview && <AdminReviewScreen onClose={() => setShowAdminReview(false)} />}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}
     </div>
   );
@@ -4182,7 +4505,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const [adoptionDoneFor, setAdoptionDoneFor] = useState<string | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const subscription = useSubscription(user?.id ?? null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -4221,14 +4543,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
   if (adopting || adoptionDoneFor !== user.id) return <LoadingScreen label="Setting up your account…" />;
-  if (subscription.loading) return <LoadingScreen />;
-  if (!hasActiveAccess(subscription.status)) {
-    return (
-      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh" }}>
-        <PaywallScreen status={subscription.status} />
-      </div>
-    );
-  }
+  // No paywall — the app itself is free. Revenue now comes only from the
+  // coach marketplace (Program purchases, paid groups), not a base app fee.
   return <>{children}</>;
 }
 
