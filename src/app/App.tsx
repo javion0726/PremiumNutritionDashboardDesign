@@ -541,9 +541,56 @@ function DashboardScreen({
       </div>
 
       <div className="flex flex-col gap-4 px-5 pb-28">
-        {!hasAnyData ? (
-          <div className="flex flex-col gap-5">
-            {/* Real plan data, not a placeholder — tapping goes straight to Workout */}
+        {/* Hero — same real logic as before (active plan day / rest day /
+            custom session / no plan). The "no plan" branch already handles a
+            brand-new user gracefully ("Start your workout — pick up where
+            you left off or start something new") — it just used to be
+            trapped behind a hard "do you have any data yet" gate that hid
+            the whole dashboard from anyone who hadn't logged something
+            first. Removed that gate; every section below now decides for
+            itself whether it has something real to show. */}
+        {activePlan && plan && todayDay && todayDay.type !== "rest" ? (
+          <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+            <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+            <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs" style={{ color: "rgba(255,255,255,0.75)" }}>Week {activePlan.currentWeek} of {plan.totalWeeks}</span>
+              </div>
+              <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }}>
+                <div className="h-full rounded-full" style={{ width: `${Math.round((activePlan.currentWeek / plan.totalWeeks) * 100)}%`, background: "#fff" }} />
+              </div>
+            </div>
+            <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start workout</button>
+          </div>
+        ) : activePlan && plan && todayDay ? (
+          <div className="rounded-2xl p-5" style={{ background: C.surfaceAlt }}>
+            <Zap size={22} style={{ color: C.mut, marginBottom: 10 }} />
+            <p className="text-lg font-bold mb-1" style={{ color: C.pri }}>Rest day</p>
+            <p className="text-xs" style={{ color: C.mut }}>Recovery is part of the program.</p>
+          </div>
+        ) : customSession ? (
+          <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+            <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+            <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Custom workout</p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{customSession.exercises.length} exercises · in progress</p>
+            <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Continue workout</button>
+          </div>
+        ) : (
+          <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+            <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+            <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Start your workout</p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)", maxWidth: 200 }}>Pick up where you left off or start something new.</p>
+            <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start now</button>
+          </div>
+        )}
+
+        {/* For a genuinely brand-new user, real plan options and other real
+            first actions show right alongside the hero — not gating the
+            rest of the page anymore, just appearing in addition to it. */}
+        {!hasAnyData && (
+          <>
             <div>
               <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Popular plans to get started</p>
               <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
@@ -559,77 +606,28 @@ function DashboardScreen({
                 ))}
               </div>
             </div>
-
-            {/* Every real first action a brand-new user might take — not just
-                "log a workout." Someone might land here having never logged
-                anything at all; each card is a genuine, working shortcut. */}
-            <div>
-              <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Get started</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={onBuildWorkout} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
-                  <Dumbbell size={20} style={{ color: C.accent }} />
-                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Start a workout</p>
-                </button>
-                <button onClick={onGoToNutrition} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
-                  <Utensils size={20} style={{ color: C.accent }} />
-                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Log a meal</p>
-                </button>
-                <button onClick={onGoToGoals} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
-                  <Target size={20} style={{ color: C.accent }} />
-                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Set a goal</p>
-                </button>
-                <button onClick={onGoToProgress} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
-                  <Scale size={20} style={{ color: C.accent }} />
-                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Track a measurement</p>
-                </button>
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={onBuildWorkout} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                <Dumbbell size={20} style={{ color: C.accent }} />
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>Start a workout</p>
+              </button>
+              <button onClick={onGoToNutrition} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                <Utensils size={20} style={{ color: C.accent }} />
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>Log a meal</p>
+              </button>
+              <button onClick={onGoToGoals} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                <Target size={20} style={{ color: C.accent }} />
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>Set a goal</p>
+              </button>
+              <button onClick={onGoToProgress} className="p-4 rounded-2xl border text-left flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
+                <Scale size={20} style={{ color: C.accent }} />
+                <p className="text-sm font-semibold" style={{ color: C.pri }}>Track a measurement</p>
+              </button>
             </div>
-          </div>
-        ) : (
-          <>
-            {/* Hero — same real logic as before (active plan day / rest day /
-                custom session / no plan), restyled as a bold hero card
-                instead of a plain white card, matching the redesigned
-                direction agreed on. Every branch below is the exact same
-                condition that existed before — only the visual treatment
-                changed, nothing about what triggers each state. */}
-            {activePlan && plan && todayDay && todayDay.type !== "rest" ? (
-              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
-                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
-                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
-                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.75)" }}>Week {activePlan.currentWeek} of {plan.totalWeeks}</span>
-                  </div>
-                  <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${Math.round((activePlan.currentWeek / plan.totalWeeks) * 100)}%`, background: "#fff" }} />
-                  </div>
-                </div>
-                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start workout</button>
-              </div>
-            ) : activePlan && plan && todayDay ? (
-              <div className="rounded-2xl p-5" style={{ background: C.surfaceAlt }}>
-                <Zap size={22} style={{ color: C.mut, marginBottom: 10 }} />
-                <p className="text-lg font-bold mb-1" style={{ color: C.pri }}>Rest day</p>
-                <p className="text-xs" style={{ color: C.mut }}>Recovery is part of the program.</p>
-              </div>
-            ) : customSession ? (
-              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
-                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
-                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Custom workout</p>
-                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{customSession.exercises.length} exercises · in progress</p>
-                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Continue workout</button>
-              </div>
-            ) : (
-              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
-                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
-                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Start your workout</p>
-                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)", maxWidth: 200 }}>Pick up where you left off or start something new.</p>
-                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start now</button>
-              </div>
-            )}
+          </>
+        )}
 
+        <>
             {/* Today's insight — same real, computed card as before */}
             <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
               <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
@@ -782,7 +780,6 @@ function DashboardScreen({
               ))}
             </div>
           </>
-        )}
       </div>
     </div>
   );
