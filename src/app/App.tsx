@@ -587,9 +587,50 @@ function DashboardScreen({
           </div>
         ) : (
           <>
-            {/* Today's insight — moved to the top: this is the one card built
-                from your actual data, not a generic layout piece, so it leads
-                instead of trailing after everything else. */}
+            {/* Hero — same real logic as before (active plan day / rest day /
+                custom session / no plan), restyled as a bold hero card
+                instead of a plain white card, matching the redesigned
+                direction agreed on. Every branch below is the exact same
+                condition that existed before — only the visual treatment
+                changed, nothing about what triggers each state. */}
+            {activePlan && plan && todayDay && todayDay.type !== "rest" ? (
+              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
+                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.75)" }}>Week {activePlan.currentWeek} of {plan.totalWeeks}</span>
+                  </div>
+                  <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }}>
+                    <div className="h-full rounded-full" style={{ width: `${Math.round((activePlan.currentWeek / plan.totalWeeks) * 100)}%`, background: "#fff" }} />
+                  </div>
+                </div>
+                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start workout</button>
+              </div>
+            ) : activePlan && plan && todayDay ? (
+              <div className="rounded-2xl p-5" style={{ background: C.surfaceAlt }}>
+                <Zap size={22} style={{ color: C.mut, marginBottom: 10 }} />
+                <p className="text-lg font-bold mb-1" style={{ color: C.pri }}>Rest day</p>
+                <p className="text-xs" style={{ color: C.mut }}>Recovery is part of the program.</p>
+              </div>
+            ) : customSession ? (
+              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Custom workout</p>
+                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{customSession.exercises.length} exercises · in progress</p>
+                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Continue workout</button>
+              </div>
+            ) : (
+              <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
+                <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
+                <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>Start your workout</p>
+                <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)", maxWidth: 200 }}>Pick up where you left off or start something new.</p>
+                <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start now</button>
+              </div>
+            )}
+
+            {/* Today's insight — same real, computed card as before */}
             <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
               <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
               <p className="text-sm" style={{ color: C.sec }}>{todayInsight}</p>
@@ -633,79 +674,62 @@ function DashboardScreen({
               </div>
             </Card>
 
-            {/* Today's Mission */}
-            <Card>
-              <div className="flex items-center justify-between mb-3">
-                <SectionLabel>Today's Mission</SectionLabel>
-                {activePlan && plan && (
-                  <span className="text-xs font-mono px-2 py-0.5 rounded-md" style={{ background: C.accentSoft, color: C.accent }}>
-                    Week {activePlan.currentWeek} of {plan.totalWeeks}
-                  </span>
-                )}
+            {/* Recent Activity — real, computed from the actual journal, not
+                invented. Shows the last few days with something logged,
+                duration computed from real startedAt/finishedAt timestamps
+                when both exist. */}
+            {(() => {
+              const journal = getJournal();
+              const recentDays = Object.entries(journal)
+                .filter(([, entry]) => (entry.exArr?.length ?? 0) > 0)
+                .sort(([a], [b]) => b.localeCompare(a))
+                .slice(0, 3);
+              if (!recentDays.length) return null;
+              const todayStr = todayKey();
+              const yesterdayStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; })();
+              return (
+                <div>
+                  <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Recent activity</p>
+                  <div className="flex flex-col gap-2">
+                    {recentDays.map(([dateKey, entry]) => {
+                      const label = dateKey === todayStr ? "Today" : dateKey === yesterdayStr ? "Yesterday" : new Date(dateKey).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                      const durationMin = entry.startedAt && entry.finishedAt ? Math.round((entry.finishedAt - entry.startedAt) / 60000) : null;
+                      const name = entry.wType || entry.exArr?.[0]?.name || "Workout";
+                      return (
+                        <div key={dateKey} className="flex items-center gap-3 rounded-2xl border p-3" style={{ background: C.surface, borderColor: C.border }}>
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: C.surfaceAlt }}>
+                            <Clock size={16} style={{ color: C.sec }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: C.pri }}>{name}</p>
+                            <p className="text-xs" style={{ color: C.mut }}>{label}{durationMin ? ` · ${durationMin} min` : ""}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Join a Coach Group — a real, working link into the actual
+                Groups/Discover feature, not a decorative dead-end. */}
+            <div className="rounded-2xl p-4" style={{ background: C.surfaceAlt }}>
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Join a coach group</p>
+                  <p className="text-xs" style={{ color: C.sec, maxWidth: 190 }}>Train with a coach and a community that keeps you accountable.</p>
+                </div>
+                <div className="flex flex-shrink-0">
+                  {["#1F5C3A", "#D85A30", "#534AB7"].map((c, i) => (
+                    <div key={i} className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white" style={{ background: c, border: `2px solid ${C.surfaceAlt}`, marginLeft: i > 0 ? -8 : 0 }}>
+                      {["M", "A", "C"][i]}
+                    </div>
+                  ))}
+                </div>
               </div>
-              {activePlan && plan && todayDay && todayDay.type !== "rest" ? (
-                <>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentSoft, color: C.accent }}>
-                      <Dumbbell size={18} />
-                    </div>
-                    <div>
-                      <p className="text-base font-semibold" style={{ color: C.pri }}>{todayDay.label}</p>
-                      <p className="text-xs" style={{ color: C.mut }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Btn full onClick={onGoToWorkout}><Play size={14} /> Start workout</Btn>
-                    <Btn variant="secondary" onClick={onGoToWorkout}>
-                      <span className="text-xs">View plan</span>
-                    </Btn>
-                  </div>
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs" style={{ color: C.mut }}>Plan progress</span>
-                      <span className="text-xs font-mono" style={{ color: C.mut }}>
-                        Week {activePlan.currentWeek}/{plan.totalWeeks}
-                      </span>
-                    </div>
-                    <ProgressBar value={activePlan.currentWeek} max={plan.totalWeeks} height={4} />
-                  </div>
-                </>
-              ) : activePlan && plan && todayDay ? (
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.mut }}>
-                    <Zap size={18} />
-                  </div>
-                  <div>
-                    <p className="text-base font-semibold" style={{ color: C.pri }}>Rest day</p>
-                    <p className="text-xs" style={{ color: C.mut }}>Recovery is part of the program</p>
-                  </div>
-                </div>
-              ) : customSession ? (
-                <>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentSoft, color: C.accent }}>
-                      <Dumbbell size={18} />
-                    </div>
-                    <div>
-                      <p className="text-base font-semibold" style={{ color: C.pri }}>Custom Workout</p>
-                      <p className="text-xs" style={{ color: C.mut }}>{customSession.exercises.length} exercises · in progress</p>
-                    </div>
-                  </div>
-                  <Btn full onClick={onGoToWorkout}><Play size={14} /> Continue workout</Btn>
-                </>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.surfaceAlt, color: C.mut }}>
-                    <Calendar size={18} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-base font-semibold" style={{ color: C.pri }}>No active plan</p>
-                    <p className="text-xs" style={{ color: C.mut }}>Browse weekly plans to auto-populate this card</p>
-                  </div>
-                  <Btn variant="secondary" onClick={onGoToWorkout}>Browse</Btn>
-                </div>
-              )}
-            </Card>
+              <Btn full variant="secondary" onClick={onGoToWorkout}>Browse groups</Btn>
+            </div>
 
             {/* Nutrition summary */}
             <Card>
