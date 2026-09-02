@@ -728,57 +728,6 @@ function DashboardScreen({
               </div>
               <Btn full variant="secondary" onClick={onGoToWorkout}>Browse groups</Btn>
             </div>
-
-            {/* Nutrition summary */}
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <SectionLabel>Nutrition</SectionLabel>
-                <span className="text-xs font-mono" style={{ color: C.accent }}>{Math.round(totals.cal).toLocaleString()} / {targets.calories.toLocaleString()} kcal</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <Ring value={totals.cal} max={targets.calories} size={76} stroke={7}>
-                  <span className="text-sm font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{Math.min(100, nutritionPct)}%</span>
-                </Ring>
-                <div className="flex-1 flex flex-col gap-2">
-                  {[
-                    { label: "Protein", val: Math.round(totals.prot), max: targets.protein, color: "#4A7C6F" },
-                    { label: "Carbs", val: Math.round(totals.carb), max: targets.carbs, color: C.accent },
-                    { label: "Fat", val: Math.round(totals.fat), max: targets.fats, color: "#7A6B5A" },
-                  ].map(m => (
-                    <div key={m.label} className="flex items-center gap-2">
-                      <span className="text-xs w-12" style={{ color: C.mut }}>{m.label}</span>
-                      <div className="flex-1"><ProgressBar value={m.val} max={m.max} color={m.color} height={5} /></div>
-                      <span className="text-xs font-mono w-10 text-right" style={{ color: C.sec }}>{m.val}g</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {!targets.personalized && (
-                <button onClick={onOpenCalculator} className="w-full flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
-                  <span className="text-xs" style={{ color: C.accent, fontWeight: 600 }}>Using default targets — personalize with the calculator</span>
-                  <ChevronRight size={14} style={{ color: C.accent, flexShrink: 0 }} />
-                </button>
-              )}
-            </Card>
-
-            {/* Stat tiles */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { icon: <Flame size={16} style={{ color: C.warn }} />, label: "Volume today", val: String(workoutVolume(today)), unit: "lbs", soft: C.warnSoft },
-                { icon: <Droplets size={16} style={{ color: "#4A7C6F" }} />, label: "Water", val: waterDisplay, unit: waterUnitLabel, soft: C.accentSoft },
-                { icon: <Zap size={16} style={{ color: "#6B5EA8" }} />, label: "Recovery", val: recovery.hasInputs ? String(recovery.score) : "—", unit: "/100", soft: "#F0EDF8" },
-              ].map(s => (
-                <div key={s.label} className="rounded-2xl p-3 border flex flex-col gap-2" style={{ background: C.surface, borderColor: C.border }}>
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: s.soft }}>{s.icon}</div>
-                  <div>
-                    <p className="text-xs" style={{ color: C.mut }}>{s.label}</p>
-                    <p className="text-lg font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>
-                      {s.val}<span className="text-xs font-normal ml-0.5" style={{ color: C.mut }}>{s.unit}</span>
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </>
       </div>
     </div>
