@@ -9,7 +9,7 @@ import {
   AlertCircle, Loader2,
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
-  Timer, Calendar, Share2, Smartphone, Quote, Users, Camera, BookOpen,
+  Timer, Calendar, Share2, Smartphone, Quote, Users, Camera, BookOpen, Sparkles, Mountain,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -31,7 +31,7 @@ import {
 import { useAppData } from "./lib/useAppData";
 import {
   calcStreak, calcLongestStreak, mealTotals, getTargets, calcTargets,
-  computeDisciplineScore, disciplineAverages, weekActivity, workoutVolume,
+  weekActivity, workoutVolume,
   bestSets, strengthHistory, consistencyGrid, advancePlanDay, resolveGoalCurrent,
   recoveryScore, workoutStats, getBlockForWeek, getWeekInBlock, progressedWeight,
 } from "./lib/engine";
@@ -471,6 +471,7 @@ function DashboardScreen({
   onGoToProgress: () => void;
 }) {
   useAppData();
+  const [insightIndex, setInsightIndex] = useState(0);
   const cfg = getConfig();
   const plan = PLANS.find(p => p.id === activePlan?.planId);
   const currentBlock = plan && activePlan ? getBlockForWeek(plan.blocks, activePlan.currentWeek) : undefined;
@@ -480,14 +481,8 @@ function DashboardScreen({
   const today = getDay(todayKey());
   const hasAnyData = !!(today.exArr?.length || today.mealArr?.length || activePlan || customSession);
 
-  const { score } = computeDisciplineScore(todayKey());
   const streak = calcStreak();
   const wa = weekActivity();
-  const yesterdayScore = computeDisciplineScore(
-    (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; })()
-  ).score;
-  const scoreDelta = score - yesterdayScore;
-  const scoreLabel = score >= 80 ? "Excellent week" : score >= 60 ? "Solid progress" : score > 0 ? "Building momentum" : "No activity yet today";
 
   const targets = getTargets();
   const totals = mealTotals(today.mealArr);
@@ -503,23 +498,32 @@ function DashboardScreen({
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  // Today's insight — same "compute one real thing, don't fabricate" approach
-  // used on the Nutrition screen. Priority order: protein gap, streak
-  // momentum, discipline trend, then a plain nudge to log something.
+  // Today's Insight is now a real, multi-card carousel — each card only
+  // appears if its underlying condition is actually true, same
+  // "compute one real thing, don't fabricate" rule as before, just applied
+  // per-card instead of picking one winner by priority. No longer depends
+  // on Discipline Score at all, which was removed.
   const proteinGap = Math.max(0, targets.protein - Math.round(totals.prot));
-  let todayInsight: string;
+  const insights: { title: string; body: string }[] = [];
   if (!hasAnyData) {
-    todayInsight = "Log a workout or meal to see your first insight here.";
-  } else if (totals.prot > 0 && proteinGap > 10) {
-    todayInsight = `You're ${proteinGap}g below your protein target today. A protein-rich snack would close most of that gap.`;
-  } else if (streak >= 3) {
-    todayInsight = `${streak}-day streak. Consistency compounds — the habit is doing more than any single workout.`;
-  } else if (scoreDelta > 5) {
-    todayInsight = `Discipline score is up ${scoreDelta} points from yesterday. Whatever you changed, it's working.`;
-  } else if (workoutsThisWeek === 0) {
-    todayInsight = "No workouts logged this week yet. One session today keeps the week from starting behind.";
-  } else {
-    todayInsight = "Steady day. Keep logging — patterns become visible after a few more days of data.";
+    insights.push({ title: "You're just getting started", body: "Complete a workout and log your nutrition to see your progress here." });
+  }
+  if (totals.prot > 0 && proteinGap > 10) {
+    insights.push({ title: `${proteinGap}g below your protein target`, body: "A protein-rich snack would close most of that gap today." });
+  }
+  if (streak >= 2) {
+    insights.push({ title: `${streak}-day streak`, body: "Consistency compounds — the habit is doing more than any single workout." });
+  }
+  if (workoutsThisWeek > 0) {
+    insights.push({ title: `${workoutsThisWeek} workout${workoutsThisWeek === 1 ? "" : "s"} this week`, body: "Keep the momentum going into your next session." });
+  } else if (hasAnyData) {
+    insights.push({ title: "No workouts logged this week yet", body: "One session today keeps the week from starting behind." });
+  }
+  if (recovery.hasInputs) {
+    insights.push({ title: `Recovery is at ${recovery.score}/100`, body: recovery.score >= 70 ? "You're in good shape to train hard today." : "Consider an easier session or extra rest today." });
+  }
+  if (!insights.length) {
+    insights.push({ title: "Steady day", body: "Keep logging — patterns become visible after a few more days of data." });
   }
 
   return (
@@ -628,49 +632,35 @@ function DashboardScreen({
         )}
 
         <>
-            {/* Today's insight — same real, computed card as before */}
-            <div className="p-4 rounded-2xl" style={{ background: C.surface, borderLeft: `4px solid ${C.accent}`, borderTop: `1px solid ${C.border}`, borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: C.accent }}>Today's insight</p>
-              <p className="text-sm" style={{ color: C.sec }}>{todayInsight}</p>
-            </div>
-
-            {/* Discipline Score */}
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <SectionLabel>Discipline Score</SectionLabel>
-                <span className="text-xs font-mono" style={{ color: C.mut }}>{streak}-day streak</span>
+            {/* Today's Insight — now a real carousel. Every card in
+                `insights` only exists because its underlying condition was
+                actually true (computed above) — paging through never shows
+                more cards than there are real things to say. Tap the dots to
+                jump directly, or the arrow to advance (wraps around). */}
+            <div className="p-4 rounded-2xl relative overflow-hidden" style={{ background: C.accentSoft }}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <Sparkles size={13} style={{ color: C.accent }} />
+                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.accent }}>Today's insight</p>
               </div>
-              <div className="flex items-center gap-5">
-                <Ring value={score} max={100} size={100} stroke={9}>
-                  <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{score}</span>
-                  <span className="text-xs" style={{ color: C.mut }}>/100</span>
-                </Ring>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>{scoreLabel}</p>
-                  <p className="text-xs mb-3" style={{ color: C.mut }}>
-                    {scoreDelta === 0 ? "Same as yesterday" : `${scoreDelta > 0 ? "+" : ""}${scoreDelta} pts from yesterday`}
-                  </p>
-                  <div className="flex flex-col gap-1.5">
-                    {[
-                      { label: "Workouts", val: workoutsThisWeek, max: plan?.daysPerWeek ?? 5 },
-                      { label: "Nutrition", val: Math.min(100, nutritionPct), max: 100 },
-                      { label: "Recovery", val: recovery.score, max: 100 },
-                    ].map(s => (
-                      <div key={s.label} className="flex items-center gap-2">
-                        <span className="text-xs w-16" style={{ color: C.mut }}>{s.label}</span>
-                        <div className="flex-1"><ProgressBar value={s.val} max={s.max} /></div>
-                        <span className="text-xs font-mono w-6 text-right" style={{ color: C.sec }}>{Math.round((s.val / s.max) * 100)}</span>
-                      </div>
+              <p className="text-base font-bold mb-1" style={{ color: C.pri, maxWidth: 220 }}>{insights[insightIndex % insights.length].title}</p>
+              <p className="text-sm mb-3" style={{ color: C.sec, maxWidth: 220 }}>{insights[insightIndex % insights.length].body}</p>
+              {insights.length > 1 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {insights.map((_, i) => (
+                      <button key={i} onClick={() => setInsightIndex(i)} aria-label={`Insight ${i + 1}`}
+                        className="rounded-full transition-all"
+                        style={{ width: i === insightIndex % insights.length ? 16 : 6, height: 6, background: i === insightIndex % insights.length ? C.accent : "rgba(31,92,58,0.25)" }} />
                     ))}
                   </div>
-                  <div className="flex gap-0.5 mt-3">
-                    {wa.scores.map((s, i) => (
-                      <div key={i} className="h-1 flex-1 rounded-full" style={{ background: s >= 50 ? C.accent : C.border }} />
-                    ))}
-                  </div>
+                  <button onClick={() => setInsightIndex(i => (i + 1) % insights.length)} aria-label="Next insight"
+                    className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,255,255,0.6)" }}>
+                    <ChevronRight size={14} style={{ color: C.accent }} />
+                  </button>
                 </div>
-              </div>
-            </Card>
+              )}
+              <Mountain size={72} style={{ position: "absolute", right: -8, bottom: -8, color: "rgba(31,92,58,0.12)", pointerEvents: "none" }} />
+            </div>
 
             {/* Recent Activity — real, computed from the actual journal, not
                 invented. Shows the last few days with something logged,
@@ -3731,8 +3721,8 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
     a: "Sync happens when you open or sign into the app, not continuously in real time between two devices that are both open at once. Closing and reopening the app (or signing out and back in) on the other device will pull the latest data down.",
   },
   {
-    q: "How is my Discipline Score calculated?",
-    a: "From your actual logged workouts, nutrition, and recovery signals for the day — it's a real computed number based on what you've entered, not an estimate or a marketing figure.",
+    q: "How is Today's Insight generated?",
+    a: "Each card only appears because something real is true — a genuine streak, an actual protein gap, real workouts logged this week. Nothing is invented or estimated; if there's nothing real to say yet, you'll see a simple prompt to get started instead.",
   },
   {
     q: "What's the difference between following a Plan and building a custom workout?",
@@ -3785,7 +3775,7 @@ const ABOUT_TEXT = [
   "Ascend is built for people who want real structure, not another app to check.",
   "Most fitness apps make you choose: a workout logger, a food tracker, a progress app — usually three separate subscriptions that don't talk to each other. Ascend puts your training, nutrition, measurements, and goals in one place, because your actual results depend on how those things work together, not any one of them alone.",
   "You don't need to already know what you're doing to start. If you're not sure what a workout should even look like, Ascend gives you real structured plans built around progressive overload — you don't have to design one yourself. Every exercise comes with a guide and target-muscle breakdown, so you're never standing in a gym (or your living room) wondering how something's supposed to be done. And if you'd rather build your own workout from scratch, the full exercise library is there for that too.",
-  "This isn't built for casual step-counting. It's for someone actively working toward something specific — a strength number, a body composition goal, a level of consistency — who wants their plan, their food, and their progress tracked honestly, without invented data or inflated claims. The Discipline Score, streaks, and Coach feed exist to keep you accountable to that goal — not to gamify you into checking an app you don't need.",
+  "This isn't built for casual step-counting. It's for someone actively working toward something specific — a strength number, a body composition goal, a level of consistency — who wants their plan, their food, and their progress tracked honestly, without invented data or inflated claims. Streaks, real insights, and the Coach feed exist to keep you accountable to that goal — not to gamify you into checking an app you don't need.",
 ];
 
 function AboutSheet({ onClose }: { onClose: () => void }) {
