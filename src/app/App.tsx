@@ -480,6 +480,12 @@ function DashboardScreen({
 
   const today = getDay(todayKey());
   const hasAnyData = !!(today.exArr?.length || today.mealArr?.length || activePlan || customSession);
+  // Separate, narrower check specifically for "Popular plans to get
+  // started" — that section is about starting a workout plan, not about
+  // whether the person has done anything at all in the app. Logging a meal
+  // or setting a goal shouldn't make workout recommendations disappear for
+  // someone who hasn't actually picked a plan yet.
+  const hasStartedWorkout = !!(activePlan || customSession);
 
   const streak = calcStreak();
   const wa = weekActivity();
@@ -508,7 +514,11 @@ function DashboardScreen({
   if (!hasAnyData) {
     insights.push({ title: "You're just getting started", body: "Complete a workout and log your nutrition to see your progress here." });
   }
-  if (totals.prot > 0 && proteinGap > 10) {
+  if (hour >= 14 && totals.prot > 0 && proteinGap > 10) {
+    // Gated on time of day, not just the raw gap — comparing logged protein
+    // against a full day's target at 8am will always look "way behind,"
+    // which isn't a meaningful signal, just the day not being over yet.
+    // Afternoon onward is when being behind is actually worth acting on.
     insights.push({ title: `${proteinGap}g below your protein target`, body: "A protein-rich snack would close most of that gap today." });
   }
   if (streak >= 2) {
@@ -590,10 +600,11 @@ function DashboardScreen({
           </div>
         )}
 
-        {/* For a genuinely brand-new user, real plan options and other real
-            first actions show right alongside the hero — not gating the
-            rest of the page anymore, just appearing in addition to it. */}
-        {!hasAnyData && (
+        {/* For someone who hasn't actually started a workout plan yet, real
+            plan options and other real first actions show right alongside
+            the hero — regardless of whether they've logged food or set a
+            goal, since those are unrelated to picking a workout. */}
+        {!hasStartedWorkout && (
           <>
             <div>
               <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Popular plans to get started</p>
@@ -682,7 +693,17 @@ function DashboardScreen({
                     {recentDays.map(([dateKey, entry]) => {
                       const label = dateKey === todayStr ? "Today" : dateKey === yesterdayStr ? "Yesterday" : new Date(dateKey).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                       const durationMin = entry.startedAt && entry.finishedAt ? Math.round((entry.finishedAt - entry.startedAt) / 60000) : null;
-                      const name = entry.wType || entry.exArr?.[0]?.name || "Workout";
+                      // A custom workout's own name has a date baked in from
+                      // whenever the session was first started — not from
+                      // when it was actually saved to this day. If someone
+                      // starts a session one day and finishes it the next,
+                      // that baked-in date can disagree with the real date
+                      // this entry is actually stored under (the `label`
+                      // above, computed from the real key). Stripping it
+                      // avoids showing two different, conflicting dates on
+                      // the same card — `label` is the reliable one.
+                      const rawName = entry.wType || entry.exArr?.[0]?.name || "Workout";
+                      const name = rawName.startsWith("Custom Workout") ? "Custom Workout" : rawName;
                       return (
                         <div key={dateKey} className="flex items-center gap-3 rounded-2xl border p-3" style={{ background: C.surface, borderColor: C.border }}>
                           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: C.surfaceAlt }}>
