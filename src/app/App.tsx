@@ -181,6 +181,8 @@ const PLAN_IMAGES: Record<string, string> = {
   "fat-loss": "/images/plans/fat-loss.jpg",
   "muscle-building": "/images/plans/muscle-building.jpg",
   "strength": "/images/plans/strength.jpg",
+  "beginner": "/images/plans/beginner.jpg",
+  "athletic": "/images/plans/athletic.jpg",
 };
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
@@ -3791,7 +3793,7 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   },
   {
     q: "Is the Coach feed actually AI?",
-    a: "No — it's rule-based feedback computed directly from your real logged data (things like your protein gap, streak momentum, or discipline trend). It's not AI-generated, and it never invents an insight it can't support with your actual numbers.",
+    a: "No — it's rule-based feedback computed directly from your real logged data (things like your protein gap, streak momentum, or weekly workout count). It's not AI-generated, and it never invents an insight it can't support with your actual numbers.",
   },
 ];
 

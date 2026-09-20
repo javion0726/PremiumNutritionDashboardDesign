@@ -11,7 +11,7 @@ export default function WelcomeScreen({ onGetStarted, onLogIn }: { onGetStarted:
     { icon: Dumbbell, title: "Train", body: "Structured plans with progressive overload, or build your own workout from scratch." },
     { icon: Utensils, title: "Fuel", body: "Real food search and macro tracking — log in seconds, not minutes." },
     { icon: Users, title: "Coach", body: "Join a coach's group, follow the workouts they post, and log your results against them." },
-    { icon: TrendingUp, title: "Track", body: "A real Discipline Score and progress history, computed from what you actually log." },
+    { icon: TrendingUp, title: "Track", body: "Real insights and progress history, computed from what you actually log." },
   ];
 
   return (
