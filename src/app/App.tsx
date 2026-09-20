@@ -609,16 +609,41 @@ function DashboardScreen({
             <div>
               <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Popular plans to get started</p>
               <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-                {PLANS.slice(0, 3).map(p => (
-                  <button key={p.id} onClick={onGoToWorkout}
-                    className="flex-shrink-0 w-40 text-left p-4 rounded-2xl border"
-                    style={{ background: C.surface, borderColor: C.border }}>
-                    <p className="text-[10px] font-mono uppercase tracking-wide mb-1.5" style={{ color: C.accent }}>{p.difficulty}</p>
-                    <p className="font-semibold text-sm mb-1" style={{ color: C.pri }}>{p.name}</p>
-                    <p className="text-xs leading-snug mb-2" style={{ color: C.mut }}>{p.tagline}</p>
-                    <p className="text-[10px] font-mono" style={{ color: C.mut }}>{p.duration}</p>
-                  </button>
-                ))}
+                {PLANS.slice(0, 3).map(p => {
+                  // Real, properly-licensed photos (Pexels/Unsplash, free for
+                  // commercial use) for the three plans that have one so far.
+                  // Any plan without a matching image falls back to the
+                  // plain card style — never a broken image.
+                  const planImages: Record<string, string> = {
+                    "fat-loss": "/images/plans/fat-loss.jpg",
+                    "muscle-building": "/images/plans/muscle-building.jpg",
+                    "strength": "/images/plans/strength.jpg",
+                  };
+                  const img = planImages[p.id];
+                  return (
+                    <button key={p.id} onClick={onGoToWorkout}
+                      className="flex-shrink-0 w-40 text-left p-4 rounded-2xl relative overflow-hidden"
+                      style={img ? { height: 168 } : { background: C.surface, border: `1px solid ${C.border}` }}>
+                      {img && (
+                        <>
+                          <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.65) 100%)" }} />
+                        </>
+                      )}
+                      <div className="relative flex flex-col h-full justify-between">
+                        <span className="text-[10px] font-mono uppercase tracking-wide self-start px-2 py-0.5 rounded-md"
+                          style={{ color: img ? "#fff" : C.accent, background: img ? "rgba(255,255,255,0.2)" : "transparent" }}>
+                          {p.difficulty}
+                        </span>
+                        <div>
+                          <p className="font-semibold text-sm mb-1" style={{ color: img ? "#fff" : C.pri }}>{p.name}</p>
+                          <p className="text-xs leading-snug mb-2" style={{ color: img ? "rgba(255,255,255,0.85)" : C.mut }}>{p.tagline}</p>
+                          <p className="text-[10px] font-mono" style={{ color: img ? "rgba(255,255,255,0.7)" : C.mut }}>{p.duration}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
