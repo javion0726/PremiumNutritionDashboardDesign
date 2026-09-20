@@ -172,6 +172,17 @@ function exerciseTargets(name: string): string | null {
 
 import { C, Btn, Input, Card, SectionLabel } from "./ui";
 
+// Real, properly-licensed photos (Pexels/Unsplash, free for commercial use)
+// for plans that have one so far — shared between Home and the Weekly Plans
+// list so adding a new photo here updates both places at once. Any plan
+// without a matching entry falls back to its plain card style everywhere,
+// never a broken image.
+const PLAN_IMAGES: Record<string, string> = {
+  "fat-loss": "/images/plans/fat-loss.jpg",
+  "muscle-building": "/images/plans/muscle-building.jpg",
+  "strength": "/images/plans/strength.jpg",
+};
+
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
 type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups" | "programs";
 type DisplayState = "populated" | "empty" | "loading" | "error";
@@ -610,24 +621,15 @@ function DashboardScreen({
               <p className="text-sm font-semibold mb-2" style={{ color: C.pri }}>Popular plans to get started</p>
               <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
                 {PLANS.slice(0, 3).map(p => {
-                  // Real, properly-licensed photos (Pexels/Unsplash, free for
-                  // commercial use) for the three plans that have one so far.
-                  // Any plan without a matching image falls back to the
-                  // plain card style — never a broken image.
-                  const planImages: Record<string, string> = {
-                    "fat-loss": "/images/plans/fat-loss.jpg",
-                    "muscle-building": "/images/plans/muscle-building.jpg",
-                    "strength": "/images/plans/strength.jpg",
-                  };
-                  const img = planImages[p.id];
+                  const img = PLAN_IMAGES[p.id];
                   return (
                     <button key={p.id} onClick={onGoToWorkout}
                       className="flex-shrink-0 w-40 text-left p-4 rounded-2xl relative overflow-hidden"
                       style={img ? { height: 168 } : { background: C.surface, border: `1px solid ${C.border}` }}>
                       {img && (
                         <>
-                          <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.65) 100%)" }} />
+                          <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ pointerEvents: "none" }} />
+                          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.65) 100%)", pointerEvents: "none" }} />
                         </>
                       )}
                       <div className="relative flex flex-col h-full justify-between">
@@ -2676,34 +2678,47 @@ function WorkoutScreen({
             <EmptyState icon={<Target size={28} />} title="No saved plans yet" body="Tap the bookmark icon on any plan to save it here for quick access." />
           ) : visiblePlans.map(p => {
             const saved = savedIds.includes(p.id);
+            const img = PLAN_IMAGES[p.id];
+            const textColor = img ? "#fff" : C.pri;
+            const mutedColor = img ? "rgba(255,255,255,0.8)" : C.mut;
             return (
-              <Card key={p.id} onClick={() => openPlanDetail(p)}>
+              <div key={p.id} onClick={() => openPlanDetail(p)}
+                className="rounded-2xl p-4 border relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+                style={{ background: C.surface, borderColor: C.border }}>
+                {img && (
+                  <>
+                    <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ pointerEvents: "none" }} />
+                    <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.75) 100%)", pointerEvents: "none" }} />
+                  </>
+                )}
+                <div className="relative">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-base font-bold" style={{ color: C.pri }}>{p.name}</h3>
+                      <h3 className="text-base font-bold" style={{ color: textColor }}>{p.name}</h3>
                       {activePlan?.planId === p.id && <Badge label="Active" />}
                     </div>
-                    <p className="text-xs" style={{ color: C.mut }}>{p.tagline}</p>
+                    <p className="text-xs" style={{ color: mutedColor }}>{p.tagline}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button onClick={(e) => { e.stopPropagation(); toggleSavedPlan(p.id); }}
                       aria-label={saved ? "Remove from saved" : "Save plan"}
                       className="w-8 h-8 rounded-lg border flex items-center justify-center"
-                      style={{ borderColor: saved ? C.accent : C.border, background: saved ? C.accentSoft : C.surface, color: saved ? C.accent : C.mut }}>
+                      style={{ borderColor: saved ? C.accent : (img ? "rgba(255,255,255,0.4)" : C.border), background: saved ? C.accentSoft : (img ? "rgba(255,255,255,0.15)" : C.surface), color: saved ? C.accent : (img ? "#fff" : C.mut) }}>
                       <Target size={13} />
                     </button>
-                    <Badge label={p.difficulty} color={`${diffColor[p.difficulty]}15`} textColor={diffColor[p.difficulty]} />
+                    <Badge label={p.difficulty} color={img ? "rgba(255,255,255,0.2)" : `${diffColor[p.difficulty]}15`} textColor={img ? "#fff" : diffColor[p.difficulty]} />
                   </div>
                 </div>
-                <p className="text-sm mb-3 leading-relaxed" style={{ color: C.sec }}>{p.description.split(".")[0]}.</p>
+                <p className="text-sm mb-3 leading-relaxed" style={{ color: img ? "rgba(255,255,255,0.9)" : C.sec }}>{p.description.split(".")[0]}.</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono" style={{ color: C.mut }}>{p.duration}</span>
-                  <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.accent }}>
+                  <span className="text-xs font-mono" style={{ color: mutedColor }}>{p.duration}</span>
+                  <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: img ? "#fff" : C.accent }}>
                     View plan <ChevronRight size={14} />
                   </div>
                 </div>
-              </Card>
+                </div>
+              </div>
             );
           })}
         </div>
