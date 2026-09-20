@@ -471,11 +471,12 @@ function Onboarding({ onComplete }: { onComplete: () => void }) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 function DashboardScreen({
-  activePlan, onGoToWorkout, onOpenProfile, onBuildWorkout, onOpenCalculator,
+  activePlan, onGoToWorkout, onOpenPlan, onOpenProfile, onBuildWorkout, onOpenCalculator,
   onGoToNutrition, onGoToGoals, onGoToProgress,
 }: {
   activePlan: ActivePlan | null;
   onGoToWorkout: () => void;
+  onOpenPlan: (planId: string) => void;
   onOpenProfile: () => void;
   onBuildWorkout: () => void;
   onOpenCalculator: () => void;
@@ -625,7 +626,7 @@ function DashboardScreen({
                 {PLANS.slice(0, 3).map(p => {
                   const img = PLAN_IMAGES[p.id];
                   return (
-                    <button key={p.id} onClick={onGoToWorkout}
+                    <button key={p.id} onClick={() => onOpenPlan(p.id)}
                       className="flex-shrink-0 w-40 text-left p-4 rounded-2xl relative overflow-hidden"
                       style={img ? { height: 168 } : { background: C.surface, border: `1px solid ${C.border}` }}>
                       {img && (
@@ -2350,19 +2351,31 @@ function ProgramsSection({ onBack }: { onBack: () => void }) {
 }
 
 function WorkoutScreen({
-  activePlan, onSetActivePlan, onPlanChanged, initialView, onConsumedInitialView,
+  activePlan, onSetActivePlan, onPlanChanged, initialView, initialPlanId, onConsumedInitialView,
 }: {
   activePlan: ActivePlan | null;
   onSetActivePlan: (p: ActivePlan | null) => void;
   onPlanChanged?: () => void;
   initialView?: WorkoutView;
+  initialPlanId?: string;
   onConsumedInitialView?: () => void;
 }) {
   useAppData();
-  const [view, setView] = useState<WorkoutView>(() => initialView ?? "overview");
-  const [selPlan, setSelPlan] = useState<WeeklyPlan | null>(null);
+  // When the user taps a specific plan card on the Home screen we arrive here
+  // with that plan's id, and should land on *that plan's* detail rather than
+  // the generic workout overview. If the id doesn't match a real plan we fall
+  // back to normal behaviour rather than showing a blank detail screen.
+  const initialPlan = initialPlanId ? (PLANS.find(p => p.id === initialPlanId) ?? null) : null;
+  const [view, setView] = useState<WorkoutView>(() => initialPlan ? "plan-detail" : (initialView ?? "overview"));
+  const [selPlan, setSelPlan] = useState<WeeklyPlan | null>(initialPlan);
   const [selDay, setSelDay] = useState<PlanDay | null>(null);
-  const [selBlockIdx, setSelBlockIdx] = useState(0);
+  const [selBlockIdx, setSelBlockIdx] = useState(() => {
+    // Match openPlanDetail: if this is the user's active plan, open on the
+    // block covering the week they're actually on, not always the first.
+    if (!initialPlan || activePlan?.planId !== initialPlan.id) return 0;
+    const idx = initialPlan.blocks.findIndex(b => activePlan.currentWeek >= b.weeks[0] && activePlan.currentWeek <= b.weeks[1]);
+    return idx >= 0 ? idx : 0;
+  });
   const [planFilter, setPlanFilter] = useState<"all" | "saved">("all");
 
   function openPlanDetail(p: WeeklyPlan) {
@@ -4579,6 +4592,7 @@ function AppShell() {
   const [profileAutoOpenCalc, setProfileAutoOpenCalc] = useState(false);
   const [activePlan, setActivePlanState] = useState<ActivePlan | null>(() => getActivePlan());
   const [workoutInitialView, setWorkoutInitialView] = useState<WorkoutView | undefined>(undefined);
+  const [workoutInitialPlanId, setWorkoutInitialPlanId] = useState<string | undefined>(undefined);
   const [globalToast, setGlobalToast] = useState("");
 
   // App-wide notification for a newly-posted group workout — runs regardless
@@ -4600,6 +4614,10 @@ function AppShell() {
   function setActivePlan(p: ActivePlan | null) {
     saveActivePlan(p);
     setActivePlanState(p);
+  }
+  function goOpenPlan(planId: string) {
+    setWorkoutInitialPlanId(planId);
+    setActiveTab("workout");
   }
   function goBuildWorkout() {
     setWorkoutInitialView("build");
@@ -4645,6 +4663,7 @@ function AppShell() {
             <DashboardScreen
               activePlan={activePlan}
               onGoToWorkout={() => setActiveTab("workout")}
+              onOpenPlan={goOpenPlan}
               onOpenProfile={() => setShowProfile(true)}
               onBuildWorkout={goBuildWorkout}
               onOpenCalculator={goOpenCalculator}
@@ -4658,7 +4677,8 @@ function AppShell() {
               activePlan={activePlan}
               onSetActivePlan={setActivePlan}
               initialView={workoutInitialView}
-              onConsumedInitialView={() => setWorkoutInitialView(undefined)}
+              initialPlanId={workoutInitialPlanId}
+              onConsumedInitialView={() => { setWorkoutInitialView(undefined); setWorkoutInitialPlanId(undefined); }}
             />
           )}
           {activeTab === "nutrition" && <NutritionScreen onOpenCalculator={goOpenCalculator} />}
