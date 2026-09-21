@@ -10,6 +10,7 @@ import {
   Scale, Moon, LogOut, Shield,
   CheckCircle2, Circle,
   Timer, Calendar, Share2, Smartphone, Quote, Users, Camera, BookOpen, Sparkles, Mountain,
+  Pencil, Trash2,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -23,7 +24,7 @@ import {
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, getJournal, todayKey, type ExEntry,
-  getMeasurements, saveMeasurements, type Measurement,
+  getMeasurements, saveMeasurements, updateWeighIn, deleteWeighIn, parseKey, daysAgoKey, type Measurement,
   getGoals, saveGoals, syncCalculatorWeightGoal,
   getSavedPlanIds, isPlanSaved, toggleSavedPlan,
   exportBackup, clearAllData,
@@ -3278,6 +3279,110 @@ const TRACKED_LIFTS = [
   { key: "Barbell Overhead Press", label: "OHP" },
 ];
 
+// Lists every weigh-in with inline edit and delete. Before this there was no
+// way to fix or remove a weigh-in once logged — a typo or old test entry was
+// stuck on the chart permanently.
+function WeightHistoryCard({ entries }: { entries: Measurement[] }) {
+  const [editing, setEditing] = useState<string | null>(null);     // date being edited
+  const [draft, setDraft] = useState("");
+  const [err, setErr] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null); // date pending delete
+  const [showAll, setShowAll] = useState(false);
+
+  const newestFirst = [...entries].sort((a, b) => b.date.localeCompare(a.date));
+  const visible = showAll ? newestFirst : newestFirst.slice(0, 5);
+
+  function startEdit(m: Measurement) {
+    setConfirming(null); setErr("");
+    setEditing(m.date); setDraft(m.weight ?? "");
+  }
+  function saveEdit(date: string) {
+    const v = parseFloat(draft);
+    // Reject blanks, non-numbers and obviously impossible body weights rather
+    // than letting a typo like "3000" wreck the chart's scale.
+    if (!draft.trim() || isNaN(v) || v <= 0 || v >= 1500) { setErr("Enter a valid weight."); return; }
+    updateWeighIn(date, String(v));
+    setEditing(null); setErr("");
+  }
+
+  return (
+    <Card>
+      <SectionLabel className="mb-2">Weight history</SectionLabel>
+      <div className="flex flex-col">
+        {visible.map((m, i) => {
+          const label = parseKey(m.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+          const unit = m.wu || "lbs";
+          const divider = i > 0 ? { borderTop: `1px solid ${C.border}` } : undefined;
+
+          if (editing === m.date) {
+            return (
+              <div key={m.date} className="py-2.5" style={divider}>
+                <p className="text-xs mb-1.5" style={{ color: C.mut }}>{label}</p>
+                <div className="flex items-center gap-2">
+                  <input autoFocus type="text" inputMode="decimal" value={draft}
+                    aria-label={`Weight for ${label}`}
+                    onChange={e => { setDraft(e.target.value); setErr(""); }}
+                    onKeyDown={e => { if (e.key === "Enter") saveEdit(m.date); if (e.key === "Escape") setEditing(null); }}
+                    className="flex-1 min-w-0 px-3 py-2 rounded-xl border text-sm outline-none"
+                    style={{ background: C.surface, borderColor: err ? C.err : C.border, color: C.pri, fontFamily: "DM Mono, monospace" }} />
+                  <span className="text-xs" style={{ color: C.mut }}>{unit}</span>
+                  <button onClick={() => saveEdit(m.date)} aria-label="Save weight"
+                    className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: C.accent, color: C.accentFg }}>
+                    <Check size={16} />
+                  </button>
+                  <button onClick={() => { setEditing(null); setErr(""); }} aria-label="Cancel edit"
+                    className="w-9 h-9 rounded-xl flex items-center justify-center border" style={{ borderColor: C.border, color: C.mut }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                {err && <p className="text-xs mt-1.5" style={{ color: C.err }}>{err}</p>}
+              </div>
+            );
+          }
+
+          if (confirming === m.date) {
+            return (
+              <div key={m.date} className="py-2.5 flex items-center justify-between gap-2" style={divider}>
+                <p className="text-sm" style={{ color: C.pri }}>Delete {m.weight} {unit} from {label}?</p>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => setConfirming(null)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: C.border, color: C.pri }}>Cancel</button>
+                  <button onClick={() => { deleteWeighIn(m.date); setConfirming(null); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: C.err, color: "#fff" }}>Delete</button>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={m.date} className="py-2.5 flex items-center justify-between" style={divider}>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{m.weight} <span className="text-xs font-normal" style={{ color: C.mut }}>{unit}</span></p>
+                <p className="text-xs" style={{ color: C.mut }}>{label}</p>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => startEdit(m)} aria-label={`Edit weight for ${label}`}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ color: C.mut }}>
+                  <Pencil size={15} />
+                </button>
+                <button onClick={() => { setEditing(null); setConfirming(m.date); }} aria-label={`Delete weight for ${label}`}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ color: C.mut }}>
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {newestFirst.length > 5 && (
+        <button onClick={() => setShowAll(v => !v)} className="text-xs font-semibold mt-2" style={{ color: C.accent }}>
+          {showAll ? "Show less" : `Show all ${newestFirst.length}`}
+        </button>
+      )}
+    </Card>
+  );
+}
+
 function ProgressScreen() {
   useAppData();
   const [showLogMeas, setShowLogMeas] = useState(false);
@@ -3286,12 +3391,22 @@ function ProgressScreen() {
 
   // Weight chart data, last 8 points
   const weightData = meas.slice(-8).map(m => ({
-    date: new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    // parseKey reads "YYYY-MM-DD" as a *local* date. new Date("YYYY-MM-DD")
+    // reads it as UTC midnight, which shows as the previous day anywhere
+    // west of UTC — i.e. every US user saw each point one day early.
+    date: parseKey(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     w: parseFloat(m.weight!),
   }));
   const currentWeight = meas.length ? parseFloat(meas[meas.length - 1].weight!) : null;
   const weightUnit = meas.length ? (meas[meas.length - 1].wu || "lbs") : "lbs";
   const weightDelta = meas.length >= 2 ? currentWeight! - parseFloat(meas[0].weight!) : 0;
+  // When the latest weigh-in was actually logged — previously this was
+  // hardcoded to "today" regardless of the real date.
+  const lastWeighKey = meas.length ? meas[meas.length - 1].date : null;
+  const lastWeighLabel = !lastWeighKey ? "" :
+    lastWeighKey === todayKey() ? "today" :
+    lastWeighKey === daysAgoKey(1) ? "yesterday" :
+    parseKey(lastWeighKey).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   // Strength — current vs. earliest known 1RM-style top set per tracked lift
   const strengthData = TRACKED_LIFTS.map(lift => {
@@ -3351,7 +3466,7 @@ function ProgressScreen() {
                 </div>
                 <div className="flex items-baseline gap-2 mb-4">
                   <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{currentWeight}</span>
-                  <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · today</span>
+                  <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · {lastWeighLabel}</span>
                 </div>
                 <div style={{ height: 130 }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -3376,11 +3491,13 @@ function ProgressScreen() {
                 <SectionLabel>Body weight</SectionLabel>
                 <div className="flex items-baseline gap-2 mt-2">
                   <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{currentWeight}</span>
-                  <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · logged today</span>
+                  <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · logged {lastWeighLabel}</span>
                 </div>
                 <p className="text-xs mt-2" style={{ color: C.mut }}>Log one more entry (any day) to start seeing your trend line here.</p>
               </Card>
             ) : null}
+
+            {meas.length >= 1 && <WeightHistoryCard entries={meas} />}
 
             {/* Measurements */}
             {measCells.length > 0 && (

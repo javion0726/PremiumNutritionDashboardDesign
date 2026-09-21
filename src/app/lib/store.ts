@@ -190,6 +190,28 @@ export function saveGoals(patch: Partial<Goals>) { save('rj_goals', { ...getGoal
 export function getMeasurements(): Measurement[] { return load<Measurement[]>('rj_meas', []) }
 export function saveMeasurements(m: Measurement[]) { save('rj_meas', m) }
 
+// A single day's Measurement entry can hold weight AND body measurements
+// (waist, chest, body fat…) logged together. Editing or deleting a *weigh-in*
+// must only touch the weight on that day — never silently throw away a waist
+// or body-fat reading logged in the same entry.
+const MEAS_FIELDS = ['weight', 'fat', 'waist', 'chest', 'arms', 'hips', 'thighs'] as const
+
+export function updateWeighIn(date: string, weight: string) {
+  saveMeasurements(getMeasurements().map(m => m.date === date ? { ...m, weight } : m))
+}
+
+export function deleteWeighIn(date: string) {
+  const next = getMeasurements().flatMap(m => {
+    if (m.date !== date) return [m]
+    const { weight: _w, wu: _wu, ...rest } = m
+    // If weight was the only thing logged that day, drop the whole entry
+    // rather than leave an empty husk behind.
+    const hasOther = MEAS_FIELDS.some(f => f !== 'weight' && rest[f as keyof typeof rest])
+    return hasOther ? [rest as Measurement] : []
+  })
+  saveMeasurements(next)
+}
+
 // ─── backup / restore / clear (feature parity with the vanilla app) ──────────
 
 const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom', 'rj_saved_plans'] as const
