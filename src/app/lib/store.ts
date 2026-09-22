@@ -200,6 +200,29 @@ export function updateWeighIn(date: string, weight: string) {
   saveMeasurements(getMeasurements().map(m => m.date === date ? { ...m, weight } : m))
 }
 
+// When a user creates a weight (or body-fat) goal, the "starting value" they
+// enter IS their measurement today. Record it on the Progress tab so their
+// chart isn't empty right after telling the app their weight.
+//
+// Only fills a gap: if they already logged that metric today we keep their
+// deliberate weigh-in rather than overwrite it with the goal form's number.
+// Returns true if something was recorded.
+export function seedMeasurementFromGoal(metric: 'weight' | 'bodyFat', value: number, unit?: string): boolean {
+  if (!isFinite(value) || value <= 0) return false
+  const date = todayKey()
+  const all = getMeasurements()
+  const today = all.find(m => m.date === date)
+  if (metric === 'weight') {
+    if (today?.weight) return false
+    const patch = { weight: String(value), wu: unit?.trim().toLowerCase() === 'kg' ? 'kg' : 'lbs' }
+    saveMeasurements(today ? all.map(m => m.date === date ? { ...m, ...patch } : m) : [...all, { date, ...patch }])
+    return true
+  }
+  if (today?.fat) return false
+  saveMeasurements(today ? all.map(m => m.date === date ? { ...m, fat: String(value) } : m) : [...all, { date, fat: String(value) }])
+  return true
+}
+
 export function deleteWeighIn(date: string) {
   const next = getMeasurements().flatMap(m => {
     if (m.date !== date) return [m]
@@ -316,6 +339,8 @@ export function syncCalculatorWeightGoal(startWeight: number, goalWeight: number
   } else {
     saveGoalsList([...goals, { ...patch, id: CALCULATOR_GOAL_ID, createdAt: new Date().toISOString() }])
   }
+  // The weight entered in the calculator is today's weight — show it on Progress.
+  seedMeasurementFromGoal('weight', startWeight, unit)
 }
 
 // ─── active weekly plan (V2) ────────────────────────────────────────────────────

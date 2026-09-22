@@ -24,7 +24,7 @@ import {
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, getJournal, todayKey, type ExEntry,
-  getMeasurements, saveMeasurements, updateWeighIn, deleteWeighIn, parseKey, daysAgoKey, type Measurement,
+  getMeasurements, saveMeasurements, updateWeighIn, deleteWeighIn, seedMeasurementFromGoal, parseKey, daysAgoKey, type Measurement,
   getGoals, saveGoals, syncCalculatorWeightGoal,
   getSavedPlanIds, isPlanSaved, toggleSavedPlan,
   exportBackup, clearAllData,
@@ -3752,6 +3752,9 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
       color: GOAL_COLORS[Math.floor(Math.random() * GOAL_COLORS.length)],
       linkedMetric: linked,
     });
+    // For a weight or body-fat goal, the starting value is today's reading —
+    // record it so it appears on the Progress tab straight away.
+    if (linked === "weight" || linked === "bodyFat") seedMeasurementFromGoal(linked, s, unit.trim());
     onClose();
   }
 
