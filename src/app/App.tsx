@@ -580,18 +580,39 @@ function DashboardScreen({
             itself whether it has something real to show. */}
         {activePlan && plan && todayDay && todayDay.type !== "rest" ? (
           <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: C.accent }}>
-            <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)" }} />
-            <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
-            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.75)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs" style={{ color: "rgba(255,255,255,0.75)" }}>Week {activePlan.currentWeek} of {plan.totalWeeks}</span>
+            {/* If today's plan has a photo (same shared PLAN_IMAGES used by the
+                plan cards), show it behind the card; otherwise keep the solid
+                green card with the dumbbell watermark. Both the photo and its
+                darkening layer MUST be pointerEvents:none — a decorative layer
+                over a clickable card has silently blocked taps in this app
+                twice before. */}
+            {PLAN_IMAGES[plan.id] ? (
+              <>
+                <img src={PLAN_IMAGES[plan.id]} alt="" aria-hidden="true"
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+                <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none",
+                  // Text sits on the left, so darken left→right (keeping the
+                  // photo visible on the right) over a lighter top→bottom wash.
+                  // Bright photos (e.g. skylights) otherwise wash out the title.
+                  background: "linear-gradient(90deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.38) 55%, rgba(0,0,0,0.12) 100%), linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 100%)" }} />
+              </>
+            ) : (
+              <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)", pointerEvents: "none" }} />
+            )}
+            {/* relative so the text and button stack above the photo layers */}
+            <div className="relative" style={PLAN_IMAGES[plan.id] ? { textShadow: "0 1px 3px rgba(0,0,0,0.45)" } : undefined}>
+              <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
+              <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.85)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>Week {activePlan.currentWeek} of {plan.totalWeeks}</span>
+                </div>
+                <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.3)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.round((activePlan.currentWeek / plan.totalWeeks) * 100)}%`, background: "#fff" }} />
+                </div>
               </div>
-              <div className="h-1 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }}>
-                <div className="h-full rounded-full" style={{ width: `${Math.round((activePlan.currentWeek / plan.totalWeeks) * 100)}%`, background: "#fff" }} />
-              </div>
+              <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent, textShadow: "none" }}>Start workout</button>
             </div>
-            <button onClick={onGoToWorkout} className="px-5 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: C.accent }}>Start workout</button>
           </div>
         ) : activePlan && plan && todayDay ? (
           <div className="rounded-2xl p-5" style={{ background: C.surfaceAlt }}>
