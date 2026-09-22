@@ -3739,7 +3739,20 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
   const [start, setStart] = useState("");
   const [target, setTarget] = useState("");
   const [deadline, setDeadline] = useState("");
-  const [linked, setLinked] = useState<LinkedMetric>("manual");
+  // Every other default on this form (Body composition, lbs, direction down,
+  // "Reach 180 lbs body weight") describes a weight goal, so tracking must
+  // default to Body weight too. Defaulting to Manual created goals that
+  // looked like weight goals but never connected to weigh-ins or Progress.
+  const [linked, setLinked] = useState<LinkedMetric>("weight");
+  // Once the user picks a tracking option themselves, stop auto-switching it
+  // when they change category.
+  const [linkedTouched, setLinkedTouched] = useState(false);
+  function applyMetric(id: LinkedMetric) {
+    setLinked(id);
+    if (id === "weight") setUnit("lbs");
+    if (id === "bodyFat") setUnit("%");
+    if (id === "streak") setUnit("days");
+  }
 
   function save() {
     if (!title.trim() || !target) return;
@@ -3787,7 +3800,10 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.mut }}>Category</span>
           <div className="flex gap-2 flex-wrap">
             {GOAL_CATEGORIES.map(c => (
-              <button key={c} onClick={() => setCategory(c)}
+              <button key={c} onClick={() => {
+                setCategory(c);
+                if (!linkedTouched) applyMetric(c === "Body composition" ? "weight" : c === "Consistency" ? "streak" : "manual");
+              }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold border"
                 style={{ background: category === c ? C.accentSoft : C.surface, borderColor: category === c ? C.accent : C.border, color: category === c ? C.accent : C.sec }}>
                 {c}
@@ -3805,7 +3821,7 @@ function AddGoalSheet({ onClose }: { onClose: () => void }) {
               { id: "bodyFat" as const, label: "Body fat %" },
               { id: "streak" as const, label: "Training streak" },
             ]).map(o => (
-              <button key={o.id} onClick={() => { setLinked(o.id); if (o.id === "weight") setUnit("lbs"); if (o.id === "bodyFat") setUnit("%"); if (o.id === "streak") setUnit("days"); }}
+              <button key={o.id} onClick={() => { setLinkedTouched(true); applyMetric(o.id); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold border"
                 style={{ background: linked === o.id ? C.accentSoft : C.surface, borderColor: linked === o.id ? C.accent : C.border, color: linked === o.id ? C.accent : C.sec }}>
                 {o.label}
