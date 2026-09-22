@@ -400,9 +400,18 @@ export function resolveGoalCurrent(linkedMetric: 'weight' | 'streak' | 'bodyFat'
   const meas = getMeasurements()
   if (!meas.length) return storedCurrent
   const sorted = [...meas].sort((a, b) => a.date.localeCompare(b.date))
-  const last = sorted[sorted.length - 1]
-  if (linkedMetric === 'weight' && last.weight) return parseFloat(last.weight)
-  if (linkedMetric === 'bodyFat' && last.fat) return parseFloat(last.fat)
+  // Use the latest entry that actually HAS this metric — not simply the
+  // latest entry. A day can hold only a waist reading (or have had its
+  // weigh-in deleted), and treating that as "no data" silently snapped the
+  // goal back to its starting value, resetting the progress bar to zero.
+  if (linkedMetric === 'weight') {
+    const w = [...sorted].reverse().find(m => m.weight)
+    return w ? parseFloat(w.weight!) : storedCurrent
+  }
+  if (linkedMetric === 'bodyFat') {
+    const f = [...sorted].reverse().find(m => m.fat)
+    return f ? parseFloat(f.fat!) : storedCurrent
+  }
   return storedCurrent
 }
 

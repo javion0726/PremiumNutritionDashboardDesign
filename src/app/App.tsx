@@ -13,7 +13,7 @@ import {
   Pencil, Trash2,
 } from "lucide-react";
 import {
-  AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
+  AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine,
   BarChart, Bar,
 } from "recharts";
 import { PLANS, type WeeklyPlan, type PlanDay, type Exercise, type Block } from "./lib/plans";
@@ -3383,7 +3383,7 @@ function WeightHistoryCard({ entries }: { entries: Measurement[] }) {
   );
 }
 
-function ProgressScreen() {
+function ProgressScreen({ onGoToGoals }: { onGoToGoals?: () => void }) {
   useAppData();
   const [showLogMeas, setShowLogMeas] = useState(false);
   const meas = getMeasurements().filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
@@ -3407,6 +3407,71 @@ function ProgressScreen() {
     lastWeighKey === todayKey() ? "today" :
     lastWeighKey === daysAgoKey(1) ? "yesterday" :
     parseKey(lastWeighKey).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  // The user's weight goal, shown on the Body weight card so weigh-ins read
+  // as progress toward something rather than numbers in isolation. If there
+  // are several active weight goals, the most recently created one wins.
+  // Progress math is identical to the Goals tab's so the two never disagree.
+  const normUnit = (u?: string) => (u || "lbs").toLowerCase().replace(/^lb$/, "lbs");
+  const weightGoal = getGoalsList()
+    .filter(g => g.linkedMetric === "weight" && !g.completed)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const goalUnitsMatch = !!weightGoal && normUnit(weightGoal.unit) === normUnit(weightUnit);
+  const goalView = weightGoal && currentWeight !== null && goalUnitsMatch ? (() => {
+    const cur = resolveGoalCurrent("weight", weightGoal.current);
+    const range = Math.abs(weightGoal.target - weightGoal.start) || 1;
+    const progress = weightGoal.dir === "down" ? (weightGoal.start - cur) / range : (cur - weightGoal.start) / range;
+    const pct = Math.max(0, Math.min(1, progress));
+    const reached = pct >= 1;
+    const toGo = Math.abs(weightGoal.target - cur);
+    return { target: weightGoal.target, color: weightGoal.color, pct, reached, toGo };
+  })() : null;
+
+  // With a goal on the chart the y-axis must stretch to include the target,
+  // and letting the chart pick ticks for that stretched range gave uneven
+  // labels (335, 308, 293, 278). Compute evenly spaced "nice" ticks instead.
+  const goalAxis = goalView && weightData.length >= 2 ? (() => {
+    const vals = [...weightData.map(d => d.w), goalView.target];
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    // Pick the smallest "nice" step that fits in at most 5 labels — more than
+    // that and the chart silently drops some, making the spacing look uneven.
+    const raw = Math.max((hi - lo) / 4, 1);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const candidates = [1, 2, 2.5, 5, 10, 20, 25, 50].map(m => m * mag);
+    let min = 0, max = 0, step = candidates[candidates.length - 1];
+    for (const st of candidates) {
+      const mn = Math.floor((lo - st * 0.25) / st) * st;
+      const mx = Math.ceil((hi + st * 0.25) / st) * st;
+      if (Math.round((mx - mn) / st) + 1 <= 5) { min = mn; max = mx; step = st; break; }
+    }
+    if (max === min) { min = Math.floor(lo / step) * step; max = min + step * 4; }
+    const ticks: number[] = [];
+    for (let t = min; t <= max + 1e-9; t += step) ticks.push(Math.round(t * 100) / 100);
+    return { min, max, ticks };
+  })() : null;
+
+  const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString();
+  const goalSummary = goalView ? (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs" style={{ color: C.sec }}>
+          Goal <span className="font-mono font-semibold" style={{ color: C.pri }}>{fmt1(goalView.target)} {weightUnit}</span>
+        </p>
+        <p className="text-xs font-semibold" style={{ color: goalView.reached ? C.ok : C.accent }}>
+          {goalView.reached ? "Goal reached" : `${fmt1(goalView.toGo)} ${weightUnit} to go`}
+        </p>
+      </div>
+      <ProgressBar value={goalView.pct * 100} max={100} color={goalView.reached ? C.ok : goalView.color} height={5} />
+    </div>
+  ) : weightGoal && !goalUnitsMatch ? (
+    <p className="text-xs mb-4" style={{ color: C.mut }}>
+      Your weight goal is in {weightGoal.unit}, but your weigh-ins are in {weightUnit}, so it can't be shown here.
+    </p>
+  ) : !weightGoal && onGoToGoals ? (
+    <button onClick={onGoToGoals} className="flex items-center gap-1 text-xs font-semibold mb-4" style={{ color: C.accent }}>
+      <Target size={13} /> Set a weight goal
+    </button>
+  ) : null;
 
   // Strength — current vs. earliest known 1RM-style top set per tracked lift
   const strengthData = TRACKED_LIFTS.map(lift => {
@@ -3468,6 +3533,7 @@ function ProgressScreen() {
                   <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{currentWeight}</span>
                   <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · {lastWeighLabel}</span>
                 </div>
+                {goalSummary}
                 <div style={{ height: 130 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={weightData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
@@ -3478,7 +3544,14 @@ function ProgressScreen() {
                         </linearGradient>
                       </defs>
                       <XAxis dataKey="date" tick={{ fontSize: 9, fill: C.mut, fontFamily: "DM Mono, monospace" }} axisLine={false} tickLine={false} />
-                      <YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: C.mut, fontFamily: "DM Mono, monospace" }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        domain={goalAxis ? [goalAxis.min, goalAxis.max] : ["auto", "auto"]}
+                        ticks={goalAxis?.ticks}
+                        interval={goalAxis ? 0 : "preserveEnd"}
+                        tick={{ fontSize: 9, fill: C.mut, fontFamily: "DM Mono, monospace" }} axisLine={false} tickLine={false} />
+                      {goalView && (
+                        <ReferenceLine y={goalView.target} stroke={goalView.reached ? C.ok : goalView.color} strokeDasharray="4 4" strokeWidth={1.5} />
+                      )}
                       <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, fontSize: 11, fontFamily: "DM Mono, monospace", color: C.pri }}
                         cursor={{ stroke: C.border, strokeWidth: 1 }} />
                       <Area type="monotone" dataKey="w" name="weight-area" stroke={C.accent} strokeWidth={2} fill="url(#wgrad)" dot={false} activeDot={{ r: 4, fill: C.accent }} />
@@ -3493,6 +3566,7 @@ function ProgressScreen() {
                   <span className="text-2xl font-bold" style={{ color: C.pri, fontFamily: "DM Mono, monospace" }}>{currentWeight}</span>
                   <span className="text-xs" style={{ color: C.mut }}>{weightUnit} · logged {lastWeighLabel}</span>
                 </div>
+                {goalSummary && <div className="mt-3">{goalSummary}</div>}
                 <p className="text-xs mt-2" style={{ color: C.mut }}>Log one more entry (any day) to start seeing your trend line here.</p>
               </Card>
             ) : null}
@@ -4799,7 +4873,7 @@ function AppShell() {
             />
           )}
           {activeTab === "nutrition" && <NutritionScreen onOpenCalculator={goOpenCalculator} />}
-          {activeTab === "progress" && <ProgressScreen />}
+          {activeTab === "progress" && <ProgressScreen onGoToGoals={() => setActiveTab("goals")} />}
           {activeTab === "goals" && <GoalsScreen />}
         </div>
         <TabBar active={activeTab} onChange={setActiveTab} />
