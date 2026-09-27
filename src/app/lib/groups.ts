@@ -5,11 +5,11 @@
 // using the exact same set-logging shape as every other workout in the app.
 
 import { supabase, isSupabaseConfigured } from './supabase'
-import type { Exercise } from './plans'
+import type { Exercise, PlanDay } from './plans'
 import type { SetRow } from './store'
 
 export type Group = { id: string; name: string; coach_user_id: string; invite_code: string | null; is_public: boolean; created_at: string }
-export type CoachProfile = { user_id: string; display_name: string; bio: string | null; created_at: string; updated_at: string }
+export type CoachProfile = { user_id: string; display_name: string; bio: string | null; avatar_url: string | null; banner_url: string | null; created_at: string; updated_at: string }
 export type GroupMember = { group_id: string; user_id: string; role: 'coach' | 'moderator' | 'member'; joined_at: string }
 export type GroupWorkout = { id: string; group_id: string; posted_by: string; title: string; exercises: Exercise[]; notes: string | null; posted_at: string }
 export type GroupWorkoutResultEntry = { name: string; sets: SetRow[] }
@@ -84,6 +84,123 @@ export async function saveCoachProfile(displayName: string, bio: string): Promis
   const { error } = await supabase.from('coach_profiles').upsert({
     user_id: user.id, display_name: displayName, bio: bio || null, updated_at: new Date().toISOString(),
   })
+  if (error) return { error: error.message }
+  return {}
+}
+
+// ─── coach profile images ───────────────────────────────────────────────────
+// Stored in the public `coach-images` bucket under `<user_id>/…`, which is
+// what the storage RLS policy keys off — a coach can only ever write into
+// their own folder. Public-read is intentional: these show on public
+// Discover cards and on members' Home screens.
+
+export type CoachImageKind = 'avatar' | 'banner'
+
+// Guard rails so a coach can't accidentally upload a 40MB RAW photo (or a
+// non-image) as their banner and wedge their own profile.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
+export async function uploadCoachImage(kind: CoachImageKind, file: File): Promise<{ url?: string; error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'You need to be signed in.' }
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return { error: 'Please choose a JPG, PNG, WEBP or GIF image.' }
+  if (file.size > MAX_IMAGE_BYTES) return { error: 'That image is larger than 5MB — please choose a smaller one.' }
+
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  // Timestamped filename rather than a fixed one: replacing an image gets a
+  // new URL, so browsers and the service worker can't serve a stale cached
+  // copy of the old picture.
+  const path = `${user.id}/${kind}-${Date.now()}.${ext}`
+
+  const { error: uploadError } = await supabase.storage.from('coach-images').upload(path, file)
+  if (uploadError) return { error: uploadError.message }
+
+  const { data: publicUrlData } = supabase.storage.from('coach-images').getPublicUrl(path)
+  const url = publicUrlData.publicUrl
+
+  // Only this one column is written, so saving an avatar never disturbs the
+  // banner (or the display name and bio).
+  const column = kind === 'avatar' ? 'avatar_url' : 'banner_url'
+  const { error } = await supabase.from('coach_profiles')
+    .update({ [column]: url, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+  if (error) return { error: error.message }
+  return { url }
+}
+
+export async function removeCoachImage(kind: CoachImageKind): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'You need to be signed in.' }
+  const column = kind === 'avatar' ? 'avatar_url' : 'banner_url'
+  const { error } = await supabase.from('coach_profiles')
+    .update({ [column]: null, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+  if (error) return { error: error.message }
+  return {}
+}
+
+// ─── coach plans ────────────────────────────────────────────────────────────
+// A coach plan is a multi-week plan a coach builds for their group. It is
+// stored in the same shape as the app's built-in plans (a 7-slot Mon–Sun
+// schedule), so once a member starts one, every existing workout screen —
+// day view, set logging, rest timer, PR detection — works on it unchanged.
+
+export type CoachPlan = {
+  id: string
+  group_id: string
+  coach_user_id: string
+  name: string
+  description: string | null
+  total_weeks: number
+  schedule: PlanDay[]
+  created_at: string
+  updated_at: string
+}
+
+export async function getGroupCoachPlans(groupId: string): Promise<CoachPlan[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('coach_plans').select('*').eq('group_id', groupId).order('created_at', { ascending: false })
+  return (data as CoachPlan[]) || []
+}
+
+export async function getCoachPlan(planId: string): Promise<CoachPlan | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('coach_plans').select('*').eq('id', planId).maybeSingle()
+  return (data as CoachPlan) || null
+}
+
+export async function createCoachPlan(
+  groupId: string, name: string, description: string, totalWeeks: number, schedule: PlanDay[],
+): Promise<{ plan?: CoachPlan; error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'You need to be signed in.' }
+  const { data, error } = await supabase.from('coach_plans').insert({
+    group_id: groupId, coach_user_id: user.id, name, description: description || null,
+    total_weeks: totalWeeks, schedule,
+  }).select().single()
+  if (error) return { error: error.message }
+  return { plan: data as CoachPlan }
+}
+
+export async function updateCoachPlan(
+  planId: string, name: string, description: string, totalWeeks: number, schedule: PlanDay[],
+): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('coach_plans').update({
+    name, description: description || null, total_weeks: totalWeeks, schedule,
+    updated_at: new Date().toISOString(),
+  }).eq('id', planId)
+  if (error) return { error: error.message }
+  return {}
+}
+
+export async function deleteCoachPlan(planId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Cloud accounts are not configured on this deployment yet.' }
+  const { error } = await supabase.from('coach_plans').delete().eq('id', planId)
   if (error) return { error: error.message }
   return {}
 }

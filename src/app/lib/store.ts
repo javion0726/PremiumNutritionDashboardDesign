@@ -237,7 +237,7 @@ export function deleteWeighIn(date: string) {
 
 // ─── backup / restore / clear (feature parity with the vanilla app) ──────────
 
-const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom', 'rj_saved_plans'] as const
+const BACKUP_KEYS = ['rj_journal', 'rj_cfg', 'rj_goals', 'rj_meas', 'rj_checkins', 'rj_templates', 'rj_schedule', 'rj_goals_list', 'rj_active_plan', 'rj_active_custom', 'rj_saved_plans', 'rj_active_coach_plan'] as const
 
 export function exportBackup(): string {
   const data: Record<string, unknown> = { _app: 'ascend', _schema: SCHEMA_VERSION, _exported: new Date().toISOString() }
@@ -350,6 +350,35 @@ export type ActivePlan = {
   currentWeek: number
   currentDayIdx: number   // index into the plan's 7-slot schedule array
   startDate: string       // ISO date
+}
+
+// ─── active coach plan (cached locally) ─────────────────────────────────────
+// When a member starts a plan their coach built, the plan itself lives in
+// Supabase — but the Home and Workout screens must keep working offline and
+// on first paint, before any network call finishes. So the whole plan is
+// cached here alongside the coach/group details needed to render it.
+//
+// ActivePlan.planId still identifies it: built-in plans use slugs
+// ("fat-loss"), coach plans use UUIDs, so the two can never collide and the
+// existing ActivePlan storage needs no change.
+export type ActiveCoachPlanCache = {
+  id: string
+  groupId: string
+  groupName: string
+  name: string
+  description: string | null
+  totalWeeks: number
+  schedule: unknown[]        // PlanDay[] — kept loose here so store.ts stays UI-agnostic
+  coachName: string | null
+  coachAvatarUrl: string | null
+  coachBannerUrl: string | null
+}
+
+export function getActiveCoachPlan(): ActiveCoachPlanCache | null {
+  return load<ActiveCoachPlanCache | null>('rj_active_coach_plan', null)
+}
+export function saveActiveCoachPlan(p: ActiveCoachPlanCache | null) {
+  save('rj_active_coach_plan', p)
 }
 
 export function getActivePlan(): ActivePlan | null { return load<ActivePlan | null>('rj_active_plan', null) }

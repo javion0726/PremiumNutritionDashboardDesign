@@ -15,6 +15,7 @@ import {
   getMeasurements, saveMeasurements, type Measurement,
   getGoals, saveGoals, getGoalsList, saveGoalsList, type Goal,
   getActivePlan, saveActivePlan, getActiveCustomSession, saveActiveCustomSession,
+  getActiveCoachPlan, saveActiveCoachPlan,
   getSavedPlanIds, subscribe, type Journal, type Config,
 } from './store'
 
@@ -186,6 +187,42 @@ export async function pullAll(userId: string): Promise<void> {
     planId: activePlanRow.plan_id, currentWeek: activePlanRow.current_week,
     currentDayIdx: activePlanRow.current_day_idx, startDate: activePlanRow.start_date,
   } : null)
+
+  // Only the active plan's ID crosses devices, and a coach-built plan lives
+  // in the database rather than in the app's code — so on a second device
+  // (or after clearing site data) that ID would resolve to nothing and the
+  // member's home screen would fall back to "no plan". Re-fetch the plan
+  // here whenever the cached copy is missing or stale, which makes the
+  // cache self-healing instead of something that has to be kept in sync.
+  const activePlanId: string | undefined = activePlanRow?.plan_id
+  const isUuid = !!activePlanId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activePlanId)
+  if (isUuid) {
+    const { data: planRow } = await supabase.from('coach_plans').select('*').eq('id', activePlanId).maybeSingle()
+    if (planRow) {
+      const [{ data: groupRow }, { data: coachRow }] = await Promise.all([
+        supabase.from('groups').select('id,name').eq('id', planRow.group_id).maybeSingle(),
+        supabase.from('coach_profiles').select('display_name,avatar_url,banner_url').eq('user_id', planRow.coach_user_id).maybeSingle(),
+      ])
+      saveActiveCoachPlan({
+        id: planRow.id,
+        groupId: planRow.group_id,
+        groupName: groupRow?.name ?? 'Your group',
+        name: planRow.name,
+        description: planRow.description ?? null,
+        totalWeeks: planRow.total_weeks,
+        schedule: planRow.schedule ?? [],
+        coachName: coachRow?.display_name ?? null,
+        coachAvatarUrl: coachRow?.avatar_url ?? null,
+        coachBannerUrl: coachRow?.banner_url ?? null,
+      })
+    }
+    // A plan the coach has since deleted simply stays cached — the member
+    // keeps following the copy they started rather than losing it mid-plan.
+  } else if (getActiveCoachPlan()) {
+    // Switched to a built-in plan (or none) on another device — drop the
+    // now-irrelevant coach plan cache.
+    saveActiveCoachPlan(null)
+  }
 
   const { data: activeCustomRow } = await supabase.from('active_custom').select('*').eq('user_id', userId).maybeSingle()
   saveActiveCustomSession(activeCustomRow ? {

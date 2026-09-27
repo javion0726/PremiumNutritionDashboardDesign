@@ -21,6 +21,7 @@ import {
   getConfig, saveConfig, isOnboarded, markOnboarded, runMigrations,
   isInstallPromptDismissed, dismissInstallPrompt,
   getActivePlan, saveActivePlan, type ActivePlan,
+  getActiveCoachPlan, saveActiveCoachPlan, type ActiveCoachPlanCache,
   getActiveCustomSession, saveActiveCustomSession, type ActiveCustomSession,
   getGoalsList, addGoal, updateGoal, deleteGoal, type Goal, type LinkedMetric,
   getDay, saveDay, getJournal, todayKey, type ExEntry,
@@ -50,7 +51,10 @@ import {
   setGroupPublic, getMyCoachProfile, getCoachProfile, saveCoachProfile,
   searchPublicGroups, getPublicGroupMemberCount, joinPublicGroup,
   setMemberRole, removeMember,
+  uploadCoachImage, removeCoachImage,
+  getGroupCoachPlans, createCoachPlan, updateCoachPlan, deleteCoachPlan,
   type Group, type GroupWorkout, type GroupWorkoutLog, type CoachProfile, type GroupMember,
+  type CoachPlan, type CoachImageKind,
 } from "./lib/groups";
 import {
   createProgram, getMyPrograms, updateProgramStatus, getChapters,
@@ -185,6 +189,45 @@ const PLAN_IMAGES: Record<string, string> = {
   "beginner": "/images/plans/beginner.jpg",
   "athletic": "/images/plans/athletic.jpg",
 };
+
+// A coach-built plan is stored in the same 7-day shape as the built-in
+// plans, so converting it to a WeeklyPlan lets every existing screen — the
+// day view, set logging, rest timer, PR detection — treat it as just another
+// plan. Built-in plans use slug ids ("fat-loss"); coach plans use UUIDs, so
+// the two can never be confused for one another.
+function coachPlanToWeeklyPlan(c: ActiveCoachPlanCache): WeeklyPlan {
+  const schedule = (c.schedule as PlanDay[]) ?? [];
+  const trainingDays = schedule.filter(d => d.type !== "rest").length;
+  return {
+    id: c.id,
+    name: c.name,
+    tagline: c.coachName ? `Coached by ${c.coachName}` : c.groupName,
+    description: c.description ?? "",
+    duration: `${trainingDays} days/week · ${c.totalWeeks} weeks`,
+    daysPerWeek: trainingDays,
+    totalWeeks: c.totalWeeks,
+    difficulty: "Intermediate",
+    // One block spanning the whole plan: a coach plan is a single repeating
+    // week, not the multi-phase periodization the built-in plans use.
+    blocks: [{
+      label: "Plan",
+      weeks: [1, c.totalWeeks],
+      focus: c.description ?? "",
+      schedule,
+    }],
+  };
+}
+
+// Resolves an active plan id to a real plan: built-in plans first, then the
+// locally cached coach plan. Returns undefined if neither matches (e.g. a
+// coach deleted the plan), which every caller already handles.
+function resolvePlanById(planId: string | undefined): WeeklyPlan | undefined {
+  if (!planId) return undefined;
+  const builtIn = PLANS.find(p => p.id === planId);
+  if (builtIn) return builtIn;
+  const cached = getActiveCoachPlan();
+  return cached && cached.id === planId ? coachPlanToWeeklyPlan(cached) : undefined;
+}
 
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
 type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups" | "programs";
@@ -488,10 +531,17 @@ function DashboardScreen({
   useAppData();
   const [insightIndex, setInsightIndex] = useState(0);
   const cfg = getConfig();
-  const plan = PLANS.find(p => p.id === activePlan?.planId);
+  const plan = resolvePlanById(activePlan?.planId);
   const currentBlock = plan && activePlan ? getBlockForWeek(plan.blocks, activePlan.currentWeek) : undefined;
   const todayDay = currentBlock?.schedule[activePlan?.currentDayIdx ?? 0];
   const customSession = getActiveCustomSession();
+  // Non-null only when the active plan is one a coach built. Drives the
+  // coach-branded hero card: their banner behind it, their avatar and name
+  // on it, so a member sees whose plan they're following.
+  const activeCoach = (() => {
+    const cached = getActiveCoachPlan();
+    return cached && cached.id === activePlan?.planId ? cached : null;
+  })();
 
   const today = getDay(todayKey());
   const hasAnyData = !!(today.exArr?.length || today.mealArr?.length || activePlan || customSession);
@@ -586,21 +636,41 @@ function DashboardScreen({
                 darkening layer MUST be pointerEvents:none — a decorative layer
                 over a clickable card has silently blocked taps in this app
                 twice before. */}
-            {PLAN_IMAGES[plan.id] ? (
-              <>
-                <img src={PLAN_IMAGES[plan.id]} alt="" aria-hidden="true"
-                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
-                <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none",
-                  // Text sits on the left, so darken left→right (keeping the
-                  // photo visible on the right) over a lighter top→bottom wash.
-                  // Bright photos (e.g. skylights) otherwise wash out the title.
-                  background: "linear-gradient(90deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.38) 55%, rgba(0,0,0,0.12) 100%), linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 100%)" }} />
-              </>
-            ) : (
-              <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)", pointerEvents: "none" }} />
-            )}
+            {(() => {
+              // Background, in priority order: the coach's banner for a coach
+              // plan, the plan photo for a built-in plan, otherwise the plain
+              // green card with its dumbbell watermark.
+              const bg = activeCoach?.coachBannerUrl ?? PLAN_IMAGES[plan.id];
+              if (!bg) {
+                return <Dumbbell size={80} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.15)", pointerEvents: "none" }} />;
+              }
+              return (
+                <>
+                  <img src={bg} alt="" aria-hidden="true"
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+                  <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none",
+                    // Text sits on the left, so darken left→right (keeping the
+                    // photo visible on the right) over a lighter top→bottom wash.
+                    // Bright photos (e.g. skylights) otherwise wash out the title.
+                    background: "linear-gradient(90deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.38) 55%, rgba(0,0,0,0.12) 100%), linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 100%)" }} />
+                </>
+              );
+            })()}
             {/* relative so the text and button stack above the photo layers */}
-            <div className="relative" style={PLAN_IMAGES[plan.id] ? { textShadow: "0 1px 3px rgba(0,0,0,0.45)" } : undefined}>
+            <div className="relative" style={(activeCoach?.coachBannerUrl || PLAN_IMAGES[plan.id]) ? { textShadow: "0 1px 3px rgba(0,0,0,0.45)" } : undefined}>
+              {activeCoach && (
+                <div className="flex items-center gap-2 mb-2.5">
+                  <div className="rounded-full overflow-hidden flex items-center justify-center flex-shrink-0"
+                    style={{ width: 28, height: 28, border: "1.5px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.2)" }}>
+                    {activeCoach.coachAvatarUrl
+                      ? <img src={activeCoach.coachAvatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+                      : <User size={14} style={{ color: "#fff" }} />}
+                  </div>
+                  <span className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.95)" }}>
+                    {activeCoach.coachName || activeCoach.groupName}
+                  </span>
+                </div>
+              )}
               <p className="text-lg font-bold mb-1" style={{ color: "#fff" }}>{todayDay.label}</p>
               <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.85)" }}>{plan.name} · {todayDay.exercises?.length ?? 0} exercises</p>
               <div className="mb-4">
@@ -1274,7 +1344,7 @@ function CustomBuilder({ onStart, onCancel }: { onStart: (exercises: Exercise[])
 // same way they'd log any other workout — ActiveSessionView itself is
 // reused unmodified; this only reads back what it already saved to log a
 // copy against the group workout too.
-type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active" | "discover" | "coach-profile-edit" | "coach-gate" | "community" | "members";
+type GroupsView = "list" | "create" | "join" | "coach-detail" | "member-detail" | "post-workout" | "results" | "member-workout" | "active" | "discover" | "coach-profile-edit" | "coach-gate" | "community" | "members" | "coach-plan-form";
 
 // ─── Coach verification gate ────────────────────────────────────────────────
 // Shared by both Groups and Programs creation flows — creating either
@@ -1378,7 +1448,7 @@ function CoachGate({ onApproved, onBack }: { onApproved: () => void; onBack: () 
   );
 }
 
-function GroupsSection({ onBack }: { onBack: () => void }) {
+function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onStartCoachPlan?: (plan: CoachPlan, group: Group, coach: CoachProfile | null) => void }) {
   const { user: currentUser } = useAuth();
   const [gView, setGView] = useState<GroupsView>("list");
   const [coachedGroups, setCoachedGroups] = useState<Group[]>([]);
@@ -1399,6 +1469,13 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   const [discoverQuery, setDiscoverQuery] = useState("");
   const [discoverCounts, setDiscoverCounts] = useState<Record<string, number>>({});
   const [myCoachProfile, setMyCoachProfile] = useState<CoachProfile | null>(null);
+  const [coachPlans, setCoachPlans] = useState<CoachPlan[]>([]);
+  const [editingCoachPlan, setEditingCoachPlan] = useState<CoachPlan | null>(null);
+  // The coach's public profile for the group being viewed — needed so a
+  // member's Home screen can show their coach's banner and avatar.
+  const [groupCoachProfile, setGroupCoachProfile] = useState<CoachProfile | null>(null);
+  const [imageUploading, setImageUploading] = useState<CoachImageKind | null>(null);
+  const [imageError, setImageError] = useState("");
   const [viewingCoachProfile, setViewingCoachProfile] = useState<CoachProfile | null>(null);
   const [makePublicOnCreate, setMakePublicOnCreate] = useState(false);
   const [profileNameInput, setProfileNameInput] = useState("");
@@ -1483,17 +1560,44 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
   async function openCoachDetail(g: Group) {
     setSelectedGroup(g);
     setLoading(true);
-    const [workouts, members] = await Promise.all([getGroupWorkouts(g.id), getGroupMembers(g.id)]);
+    const [workouts, members, plans] = await Promise.all([
+      getGroupWorkouts(g.id), getGroupMembers(g.id), getGroupCoachPlans(g.id),
+    ]);
     setGroupWorkouts(workouts);
     setMemberCount(members.filter(m => m.role === 'member').length);
+    setCoachPlans(plans);
     setLoading(false);
     setGView("coach-detail");
   }
   async function openMemberDetail(g: Group) {
     setSelectedGroup(g);
     setLoading(true);
-    const workouts = await getGroupWorkouts(g.id);
+    const [workouts, plans, coach] = await Promise.all([
+      getGroupWorkouts(g.id), getGroupCoachPlans(g.id), getCoachProfile(g.coach_user_id),
+    ]);
     setGroupWorkouts(workouts);
+    setCoachPlans(plans);
+    setGroupCoachProfile(coach);
+    // If the member is already following one of this group's plans, refresh
+    // their cached copy — the coach may have edited the plan, or changed
+    // their profile photos, since it was started.
+    const active = getActivePlan();
+    const following = active && plans.find(pl => pl.id === active.planId);
+    if (following) {
+      const prev = getActiveCoachPlan();
+      saveActiveCoachPlan({
+        id: following.id,
+        groupId: g.id,
+        groupName: g.name,
+        name: following.name,
+        description: following.description,
+        totalWeeks: following.total_weeks,
+        schedule: following.schedule,
+        coachName: coach?.display_name ?? prev?.coachName ?? null,
+        coachAvatarUrl: coach?.avatar_url ?? prev?.coachAvatarUrl ?? null,
+        coachBannerUrl: coach?.banner_url ?? prev?.coachBannerUrl ?? null,
+      });
+    }
     setLoading(false);
     setGView("member-detail");
   }
@@ -1586,6 +1690,26 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
       await logGroupWorkoutResult(selectedWorkout.id, matching.map(e => ({ name: e.name, sets: e.sets })));
     }
     setGView("member-detail");
+  }
+
+  // Coach avatar / banner upload. The profile row must exist before an image
+  // can be attached to it, so a coach who hasn't saved a display name yet is
+  // told to do that first rather than hitting a silent no-op.
+  async function handleCoachImage(kind: CoachImageKind, file: File) {
+    if (!myCoachProfile) { setImageError("Save your display name first, then add photos."); return; }
+    setImageError(""); setImageUploading(kind);
+    const { error: err } = await uploadCoachImage(kind, file);
+    setImageUploading(null);
+    if (err) { setImageError(err); return; }
+    setMyCoachProfile(await getMyCoachProfile());
+  }
+
+  async function handleRemoveCoachImage(kind: CoachImageKind) {
+    setImageError(""); setImageUploading(kind);
+    const { error: err } = await removeCoachImage(kind);
+    setImageUploading(null);
+    if (err) { setImageError(err); return; }
+    setMyCoachProfile(await getMyCoachProfile());
   }
 
   const backHeader = (title: string, onBackClick: () => void) => (
@@ -1839,7 +1963,37 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
               <div className="w-4 h-4 rounded-full absolute top-1 transition-all" style={{ left: selectedGroup.is_public ? 22 : 2, background: C.surface }} />
             </div>
           </button>
-          <Btn full onClick={() => { setEditingWorkout(null); setGView("post-workout"); }}>Post a workout</Btn>
+          <Btn full onClick={() => { setEditingCoachPlan(null); setGView("coach-plan-form"); }}>Create a plan</Btn>
+          <SectionLabel className="mt-2">Plans</SectionLabel>
+          {!coachPlans.length ? (
+            <EmptyState icon={<Calendar size={28} />} title="No plans yet"
+              body="A plan is a repeating weekly schedule your members follow for several weeks — it shows on their home screen." />
+          ) : coachPlans.map(pl => {
+            const training = (pl.schedule || []).filter(d => d.type !== "rest").length;
+            return (
+              <Card key={pl.id}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.pri }}>{pl.name}</p>
+                    <p className="text-xs mt-0.5" style={{ color: C.mut }}>{training} days/week · {pl.total_weeks} weeks</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-3 pt-3 border-t" style={{ borderColor: C.border }}>
+                  <button className="text-xs font-semibold" style={{ color: C.accent }}
+                    onClick={() => { setEditingCoachPlan(pl); setGView("coach-plan-form"); }}>Edit</button>
+                  <button className="text-xs ml-auto" style={{ color: C.err }}
+                    onClick={async () => {
+                      if (!confirm(`Delete "${pl.name}"? Members already following it keep their copy, but nobody new can start it.`)) return;
+                      const { error: err } = await deleteCoachPlan(pl.id);
+                      if (err) { alert(err); return; }
+                      setCoachPlans(await getGroupCoachPlans(selectedGroup.id));
+                    }}>Delete</button>
+                </div>
+              </Card>
+            );
+          })}
+
+          <Btn full variant="secondary" onClick={() => { setEditingWorkout(null); setGView("post-workout"); }}>Post a one-off workout</Btn>
           <SectionLabel className="mt-2">Posted workouts</SectionLabel>
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Post your first workout for the team to follow." />
@@ -1874,6 +2028,34 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           <Btn full variant="secondary" onClick={() => openCommunity(selectedGroup, "member-detail")}>Community</Btn>
           <Btn full variant="secondary" onClick={() => openMembers(selectedGroup, "member-detail")}>Members</Btn>
+
+          {coachPlans.length > 0 && (
+            <>
+              <SectionLabel className="mt-2">Plans from your coach</SectionLabel>
+              {coachPlans.map(pl => {
+                const training = (pl.schedule || []).filter(d => d.type !== "rest").length;
+                const isActive = getActivePlan()?.planId === pl.id;
+                return (
+                  <Card key={pl.id}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>{pl.name}</p>
+                      {isActive && <Badge label="Active" />}
+                    </div>
+                    {pl.description && <p className="text-xs mb-2" style={{ color: C.sec }}>{pl.description}</p>}
+                    <p className="text-xs" style={{ color: C.mut }}>{training} days/week · {pl.total_weeks} weeks</p>
+                    {!isActive && (
+                      <button className="text-xs font-semibold mt-3" style={{ color: C.accent }}
+                        onClick={() => onStartCoachPlan?.(pl, selectedGroup, groupCoachProfile)}>
+                        Start this plan
+                      </button>
+                    )}
+                  </Card>
+                );
+              })}
+              <SectionLabel className="mt-2">Posted workouts</SectionLabel>
+            </>
+          )}
+
           {!groupWorkouts.length ? (
             <EmptyState icon={<Dumbbell size={28} />} title="Nothing posted yet" body="Your coach hasn't posted a workout to this group yet." />
           ) : groupWorkouts.map(w => (
@@ -1955,7 +2137,58 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
         {backHeader("Coach profile", () => setGView(selectedGroup ? "coach-detail" : "list"))}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
-          <p className="text-sm" style={{ color: C.mut }}>Shown to anyone who finds your group in Discover.</p>
+          <p className="text-sm" style={{ color: C.mut }}>Shown to anyone who finds your group in Discover, and on your members' home screen.</p>
+
+          {/* Banner + avatar preview, laid out the same way members will see
+              it on their Home screen so a coach can tell how a photo will
+              actually crop before saving it. */}
+          <div className="rounded-2xl overflow-hidden border" style={{ borderColor: C.border, background: C.surface }}>
+            <div className="relative" style={{ height: 96, background: myCoachProfile?.banner_url ? undefined : C.surfaceAlt }}>
+              {myCoachProfile?.banner_url && (
+                <img src={myCoachProfile.banner_url} alt="" aria-hidden="true"
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+              )}
+              {!myCoachProfile?.banner_url && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <p className="text-xs" style={{ color: C.mut }}>No banner yet</p>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-3 px-4 pb-4 relative" style={{ marginTop: -24, zIndex: 1 }}>
+              <div className="rounded-full overflow-hidden flex items-center justify-center flex-shrink-0"
+                style={{ width: 56, height: 56, border: `3px solid ${C.surface}`, background: C.surfaceAlt }}>
+                {myCoachProfile?.avatar_url
+                  ? <img src={myCoachProfile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <User size={22} style={{ color: C.mut }} />}
+              </div>
+              <p className="text-sm font-semibold pt-6" style={{ color: C.pri }}>{profileNameInput || myCoachProfile?.display_name || "Your name"}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {(["avatar", "banner"] as CoachImageKind[]).map(kind => {
+              const has = kind === "avatar" ? !!myCoachProfile?.avatar_url : !!myCoachProfile?.banner_url;
+              const busy = imageUploading === kind;
+              return (
+                <div key={kind} className="flex flex-col gap-1.5">
+                  <label className="block">
+                    <input type="file" accept="image/*" className="hidden" disabled={busy}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleCoachImage(kind, f); e.target.value = ""; }} />
+                    <div className="text-center text-xs font-semibold py-2.5 rounded-xl border cursor-pointer"
+                      style={{ borderColor: C.border, color: C.accent }}>
+                      {busy ? "Uploading…" : has ? `Change ${kind}` : `Add ${kind}`}
+                    </div>
+                  </label>
+                  {has && !busy && (
+                    <button onClick={() => handleRemoveCoachImage(kind)} className="text-xs" style={{ color: C.mut }}>Remove</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {imageError && <p className="text-xs" style={{ color: C.err }}>{imageError}</p>}
+          {!myCoachProfile && <p className="text-xs" style={{ color: C.mut }}>Save your display name first, then you can add photos.</p>}
+
           <Input label="Display name" value={profileNameInput} onChange={setProfileNameInput} placeholder="e.g. Coach Jordan" />
           <Input label="Bio (optional)" value={profileBioInput} onChange={setProfileBioInput} placeholder="A line about your coaching style" />
           {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
@@ -1978,6 +2211,21 @@ function GroupsSection({ onBack }: { onBack: () => void }) {
           }}>{loading ? "Saving…" : "Save"}</Btn>
         </div>
       </div>
+    );
+  }
+
+  if (gView === "coach-plan-form" && selectedGroup) {
+    return (
+      <CoachPlanForm
+        groupId={selectedGroup.id}
+        editingPlan={editingCoachPlan ?? undefined}
+        onCancel={() => setGView("coach-detail")}
+        onSaved={async () => {
+          setCoachPlans(await getGroupCoachPlans(selectedGroup.id));
+          setEditingCoachPlan(null);
+          setGView("coach-detail");
+        }}
+      />
     );
   }
 
@@ -2158,6 +2406,176 @@ function PostWorkoutForm({ groupId, onCancel, onPosted, editingWorkout }: { grou
 
         {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
         <Btn full disabled={posting} onClick={handlePost}>{posting ? (editingWorkout ? "Saving…" : "Posting…") : (editingWorkout ? "Save changes" : "Post to group")}</Btn>
+      </div>
+
+      {showPicker && <ExercisePicker onPick={addEx} onClose={() => setShowPicker(false)} />}
+    </div>
+  );
+}
+
+// ─── Coach plan builder ────────────────────────────────────────────────────
+// A coach builds one 7-day week that repeats for the plan's duration. That
+// deliberately stops short of the multi-phase periodization the built-in
+// plans use — a repeating week is what a coach writing a plan for their
+// group actually needs, and it produces a plan in the identical shape, so
+// members' workout screens need no special handling for it.
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+function emptySchedule(): PlanDay[] {
+  return DAY_NAMES.map(d => ({ day: d, label: "Rest", type: "rest" as const }));
+}
+
+function CoachPlanForm({ groupId, onCancel, onSaved, editingPlan }: {
+  groupId: string; onCancel: () => void; onSaved: () => void; editingPlan?: CoachPlan;
+}) {
+  const [name, setName] = useState(editingPlan?.name ?? "");
+  const [description, setDescription] = useState(editingPlan?.description ?? "");
+  const [weeks, setWeeks] = useState(String(editingPlan?.total_weeks ?? 8));
+  const [schedule, setSchedule] = useState<PlanDay[]>(
+    editingPlan?.schedule?.length ? editingPlan.schedule : emptySchedule()
+  );
+  const [dayIdx, setDayIdx] = useState(0);
+  const [showPicker, setShowPicker] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const day = schedule[dayIdx];
+  const isRest = day.type === "rest";
+  const trainingDays = schedule.filter(d => d.type !== "rest").length;
+
+  // Clearing the error on any edit stops a stale "fix this" message sitting
+  // there in red after the coach has already fixed it.
+  function patchDay(patch: Partial<PlanDay>) {
+    setError("");
+    setSchedule(sch => sch.map((d, i) => i === dayIdx ? { ...d, ...patch } : d));
+  }
+  function toggleRest() {
+    // Switching a day to Rest keeps its exercises in state but drops them on
+    // save, so a coach can flip a day off and back on without retyping it.
+    patchDay(isRest
+      ? { type: "strength", label: day.label === "Rest" ? "" : day.label }
+      : { type: "rest" });
+  }
+  function addEx(exName: string) {
+    patchDay({ exercises: [...(day.exercises ?? []), { name: exName, sets: 3, reps: "10", weight: "" }] });
+    setShowPicker(false);
+  }
+  function updateEx(i: number, patch: Partial<Exercise>) {
+    patchDay({ exercises: (day.exercises ?? []).map((e, idx) => idx === i ? { ...e, ...patch } : e) });
+  }
+  function removeEx(i: number) {
+    patchDay({ exercises: (day.exercises ?? []).filter((_, idx) => idx !== i) });
+  }
+
+  async function handleSave() {
+    const w = parseInt(weeks);
+    if (!name.trim()) { setError("Give this plan a name"); return; }
+    if (!w || w < 1 || w > 52) { setError("Weeks must be between 1 and 52"); return; }
+    if (!trainingDays) { setError("Add at least one training day"); return; }
+    const missing = schedule.find(d => d.type !== "rest" && !(d.exercises?.length));
+    if (missing) { setError(`${missing.day} has no exercises — add some or set it to Rest`); return; }
+
+    // Normalize before saving: rest days carry no exercises, and a training
+    // day with no label gets a sensible one rather than rendering blank on
+    // the member's home screen.
+    const clean: PlanDay[] = schedule.map(d => d.type === "rest"
+      ? { day: d.day, label: "Rest", type: "rest" }
+      : { day: d.day, label: d.label.trim() || `${d.day} Workout`, type: d.type, exercises: d.exercises ?? [] });
+
+    setError(""); setSaving(true);
+    const { error: err } = editingPlan
+      ? await updateCoachPlan(editingPlan.id, name.trim(), description.trim(), w, clean)
+      : (await createCoachPlan(groupId, name.trim(), description.trim(), w, clean));
+    setSaving(false);
+    if (err) { setError(err); return; }
+    onSaved();
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      <div className="flex items-center gap-3 px-5 pt-14 pb-4 border-b" style={{ borderColor: C.border }}>
+        <button onClick={onCancel} className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ borderColor: C.border, color: C.sec }}>
+          <ChevronLeft size={18} />
+        </button>
+        <h2 className="text-lg font-bold" style={{ color: C.pri }}>{editingPlan ? "Edit plan" : "New plan"}</h2>
+      </div>
+
+      <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
+        <Input label="Plan name" value={name} onChange={v => { setError(""); setName(v); }} placeholder="e.g. 8-Week Strength Base" />
+        <Input label="Description (optional)" value={description} onChange={setDescription} placeholder="Who it's for and what it builds" />
+        <Input label="Length in weeks" value={weeks} onChange={v => { setError(""); setWeeks(v); }} placeholder="8" type="number" />
+
+        <div className="flex items-center justify-between pt-1">
+          <SectionLabel>Weekly schedule</SectionLabel>
+          <span className="text-xs" style={{ color: C.mut }}>{trainingDays} training {trainingDays === 1 ? "day" : "days"}</span>
+        </div>
+        <p className="text-xs" style={{ color: C.mut }}>This week repeats for the whole plan. Pick a day to edit it.</p>
+
+        <div className="flex gap-1.5">
+          {schedule.map((d, i) => {
+            const active = i === dayIdx;
+            const rest = d.type === "rest";
+            return (
+              <button key={d.day} onClick={() => setDayIdx(i)}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold border"
+                style={{
+                  background: active ? C.accent : rest ? C.surface : C.accentSoft,
+                  borderColor: active ? C.accent : C.border,
+                  color: active ? C.accentFg : rest ? C.mut : C.accent,
+                }}>
+                {d.day}
+              </button>
+            );
+          })}
+        </div>
+
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold" style={{ color: C.pri }}>{day.day}</p>
+            <button onClick={toggleRest} className="text-xs font-semibold" style={{ color: isRest ? C.accent : C.mut }}>
+              {isRest ? "Make it a training day" : "Set as rest day"}
+            </button>
+          </div>
+
+          {isRest ? (
+            <p className="text-xs" style={{ color: C.mut }}>Rest day — nothing to log.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <Input label="Day name" value={day.label === "Rest" ? "" : day.label}
+                onChange={v => patchDay({ label: v })} placeholder={`e.g. Push Day`} />
+
+              {!(day.exercises?.length) ? (
+                <Btn variant="secondary" full onClick={() => setShowPicker(true)}>Add an exercise</Btn>
+              ) : (
+                <>
+                  {(day.exercises ?? []).map((ex, i) => (
+                    <div key={i} className="rounded-xl p-3 border" style={{ borderColor: C.border, background: C.bg }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <p className="text-sm font-semibold flex-1 min-w-0" style={{ color: C.pri }}>{ex.name}</p>
+                        <button onClick={() => removeEx(i)} aria-label={`Remove ${ex.name}`}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: C.surfaceAlt, color: C.err }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input label="Sets" value={String(ex.sets)} onChange={v => updateEx(i, { sets: parseInt(v) || 0 })} />
+                        <Input label="Reps" value={ex.reps} onChange={v => updateEx(i, { reps: v })} />
+                        <Input label="Weight" value={ex.weight || ""} onChange={v => updateEx(i, { weight: v })} />
+                      </div>
+                    </div>
+                  ))}
+                  <Btn variant="secondary" full onClick={() => setShowPicker(true)}>Add another exercise</Btn>
+                </>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {error && <p className="text-sm" style={{ color: C.err }}>{error}</p>}
+        <Btn full disabled={saving} onClick={handleSave}>
+          {saving ? "Saving…" : editingPlan ? "Save changes" : "Create plan"}
+        </Btn>
       </div>
 
       {showPicker && <ExercisePicker onPick={addEx} onClose={() => setShowPicker(false)} />}
@@ -2422,7 +2840,7 @@ function WorkoutScreen({
 
   useEffect(() => { onConsumedInitialView?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plan = PLANS.find(p => p.id === activePlan?.planId);
+  const plan = resolvePlanById(activePlan?.planId);
   const currentBlock = plan && activePlan ? getBlockForWeek(plan.blocks, activePlan.currentWeek) : undefined;
   const todayDay = currentBlock?.schedule[activePlan?.currentDayIdx ?? 0];
 
@@ -2497,7 +2915,33 @@ function WorkoutScreen({
   }
 
   if (view === "groups") {
-    return <GroupsSection onBack={() => setView("overview")} />;
+    return (
+      <GroupsSection
+        onBack={() => setView("overview")}
+        onStartCoachPlan={(cp, group, coach) => {
+          // Cache the whole plan plus the coach/group details needed to draw
+          // the Home card, so both work offline and on first paint without
+          // waiting on a network call.
+          saveActiveCoachPlan({
+            id: cp.id,
+            groupId: group.id,
+            groupName: group.name,
+            name: cp.name,
+            description: cp.description,
+            totalWeeks: cp.total_weeks,
+            schedule: cp.schedule,
+            coachName: coach?.display_name ?? null,
+            coachAvatarUrl: coach?.avatar_url ?? null,
+            coachBannerUrl: coach?.banner_url ?? null,
+          });
+          onSetActivePlan({
+            planId: cp.id, currentWeek: 1, currentDayIdx: 0,
+            startDate: new Date().toISOString().split("T")[0],
+          });
+          setView("overview");
+        }}
+      />
+    );
   }
 
   if (view === "programs") {
