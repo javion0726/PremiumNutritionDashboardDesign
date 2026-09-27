@@ -41,6 +41,10 @@ import { searchFood, fetchByBarcode, type FoodResult } from "./lib/food";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 import { EX } from "./lib/exercises";
+import {
+  getMyUserProfile, uploadMyAvatar, removeMyAvatar, syncMyDisplayName, getUserProfiles,
+  type UserProfile,
+} from "./lib/userProfiles";
 import { useAuth, signOut, deleteAccount } from "./lib/auth";
 import {
   createGroup, getMyCoachedGroups, getMyMemberGroups, getGroupMembers,
@@ -232,6 +236,21 @@ function resolvePlanById(planId: string | undefined): WeeklyPlan | undefined {
 type Tab = "dashboard" | "workout" | "nutrition" | "progress" | "goals";
 type WorkoutView = "overview" | "plans" | "plan-detail" | "day-detail" | "active" | "build" | "groups" | "programs";
 type DisplayState = "populated" | "empty" | "loading" | "error";
+
+// One avatar circle used everywhere a person appears — settings, community
+// posts, member lists, the coach row on the home card. Falls back to a
+// person icon when someone hasn't uploaded a picture, so a missing avatar
+// never renders as a broken image.
+function Avatar({ url, size = 36, ring }: { url?: string | null; size?: number; ring?: string }) {
+  return (
+    <div className="rounded-full overflow-hidden flex items-center justify-center flex-shrink-0"
+      style={{ width: size, height: size, background: C.surfaceAlt, border: ring ? `2px solid ${ring}` : undefined }}>
+      {url
+        ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+        : <User size={Math.round(size * 0.45)} style={{ color: C.mut }} />}
+    </div>
+  );
+}
 
 function ProgressBar({ value, max = 100, color = C.accent, height = 6 }: { value: number; max?: number; color?: string; height?: number }) {
   return (
@@ -1474,6 +1493,14 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
   // The coach's public profile for the group being viewed — needed so a
   // member's Home screen can show their coach's banner and avatar.
   const [groupCoachProfile, setGroupCoachProfile] = useState<CoachProfile | null>(null);
+  // Public profiles (picture + name) for everyone whose post or membership
+  // row is on screen, fetched in one batch rather than one request per row.
+  const [memberProfiles, setMemberProfiles] = useState<Record<string, UserProfile>>({});
+  // Why we're on the coach profile screen. Saving used to ALWAYS flip the
+  // group public, which was fine when the only way in was the public toggle
+  // — but now a coach can open it just to change their photo, and that must
+  // not silently publish their group.
+  const [profileEditIntent, setProfileEditIntent] = useState<"make-public" | "edit">("make-public");
   const [imageUploading, setImageUploading] = useState<CoachImageKind | null>(null);
   const [imageError, setImageError] = useState("");
   const [viewingCoachProfile, setViewingCoachProfile] = useState<CoachProfile | null>(null);
@@ -1552,7 +1579,16 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
   useEffect(() => {
     if (gView !== "community" || !selectedGroup) return;
     const unsubscribe = subscribeToGroupPosts(selectedGroup.id, () => {
-      getGroupPosts(selectedGroup.id).then(setGroupPosts);
+      getGroupPosts(selectedGroup.id).then(async posts => {
+        setGroupPosts(posts);
+        // A post from someone not already on screen needs their picture and
+        // name too, or their post would render as a blank "Member".
+        const unknown = posts.map(pp => pp.user_id).filter(id => !memberProfiles[id]);
+        if (unknown.length) {
+          const fetched = await getUserProfiles(unknown);
+          setMemberProfiles(prev => ({ ...prev, ...fetched }));
+        }
+      });
     });
     return unsubscribe;
   }, [gView, selectedGroup?.id]);
@@ -1605,7 +1641,9 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
     setSelectedGroup(g);
     setCommunityBackView(backTo);
     setLoading(true);
-    setGroupPosts(await getGroupPosts(g.id));
+    const posts = await getGroupPosts(g.id);
+    setGroupPosts(posts);
+    setMemberProfiles(await getUserProfiles(posts.map(pp => pp.user_id)));
     setLoading(false);
     setGView("community");
   }
@@ -1615,6 +1653,7 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
     setLoading(true);
     const members = await getGroupMembers(g.id);
     setMembersList(members);
+    setMemberProfiles(await getUserProfiles(members.map(m => m.user_id)));
     const mine = members.find(m => m.user_id === currentUser?.id);
     setMyRole(g.coach_user_id === currentUser?.id ? 'coach' : (mine?.role ?? null));
     setLoading(false);
@@ -1649,14 +1688,19 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
 
   async function handleCreate() {
     if (!nameInput.trim()) { setError("Enter a group name"); return; }
-    if (makePublicOnCreate && !myCoachProfile && !profileNameInput.trim()) {
-      setError("Enter a display name — this is what members and browsers will see");
+    // A coach name is now asked for on every group, not just public ones —
+    // members see it on their home screen once they follow one of this
+    // coach's plans, so it matters for private groups too.
+    if (!myCoachProfile && !profileNameInput.trim()) {
+      setError("Enter a coach name — this is what your members will see");
       return;
     }
     setError(""); setLoading(true);
-    if (makePublicOnCreate && !myCoachProfile) {
+    if (!myCoachProfile) {
       const { error: profileErr } = await saveCoachProfile(profileNameInput.trim(), profileBioInput.trim());
       if (profileErr) { setLoading(false); setError(profileErr); return; }
+      // Re-read it so the photo step below has a profile row to attach to.
+      setMyCoachProfile(await getMyCoachProfile());
     }
     const { group, error: err } = await createGroup(nameInput.trim(), makePublicOnCreate);
     setLoading(false);
@@ -1839,11 +1883,20 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
           ) : membersList.map(m => (
             <Card key={m.user_id}>
               <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: C.pri }}>Member {m.user_id.slice(0, 8)}</p>
-                  <p className="text-xs mt-0.5" style={{ color: m.role === 'moderator' ? C.accent : C.mut }}>
-                    {m.role === 'moderator' ? 'Moderator' : 'Member'}
-                  </p>
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <Avatar url={memberProfiles[m.user_id]?.avatar_url} size={36} />
+                  <div className="min-w-0">
+                    {/* Falls back to a short id only when someone hasn't set
+                        a name yet — previously every row showed the raw id. */}
+                    <p className="text-sm font-semibold truncate" style={{ color: C.pri }}>
+                      {m.user_id === currentUser?.id
+                        ? "You"
+                        : (memberProfiles[m.user_id]?.display_name?.trim() || `Member ${m.user_id.slice(0, 8)}`)}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: m.role === 'moderator' ? C.accent : C.mut }}>
+                      {m.role === 'moderator' ? 'Moderator' : 'Member'}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {canManageRoles && (
@@ -1913,15 +1966,31 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
         <div className="flex flex-col gap-3 px-5 pt-4 pb-28 flex-1">
           {!groupPosts.length ? (
             <EmptyState icon={<Users size={28} />} title="No posts yet" body="Be the first to say something." />
-          ) : groupPosts.map(post => (
-            <Card key={post.id}>
-              {post.content && <p className="text-sm" style={{ color: C.pri }}>{post.content}</p>}
-              {post.image_url && (
-                <img src={post.image_url} alt="" className="w-full mt-2 rounded-xl" style={{ maxHeight: 320, objectFit: "cover" }} />
-              )}
-              <p className="text-xs mt-2" style={{ color: C.mut }}>{new Date(post.created_at).toLocaleString()}</p>
-            </Card>
-          ))}
+          ) : groupPosts.map(post => {
+            const author = memberProfiles[post.user_id];
+            const isCoach = post.user_id === selectedGroup?.coach_user_id;
+            const isMe = post.user_id === currentUser?.id;
+            return (
+              <Card key={post.id}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Avatar url={author?.avatar_url} size={32} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>
+                        {isMe ? "You" : (author?.display_name?.trim() || "Member")}
+                      </p>
+                      {isCoach && <Badge label="Coach" />}
+                    </div>
+                    <p className="text-xs" style={{ color: C.mut }}>{new Date(post.created_at).toLocaleString()}</p>
+                  </div>
+                </div>
+                {post.content && <p className="text-sm" style={{ color: C.pri }}>{post.content}</p>}
+                {post.image_url && (
+                  <img src={post.image_url} alt="" className="w-full mt-2 rounded-xl" style={{ maxHeight: 320, objectFit: "cover" }} />
+                )}
+              </Card>
+            );
+          })}
         </div>
       </div>
     );
@@ -1942,12 +2011,37 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
             </div>
             <p className="text-xs mt-2" style={{ color: C.mut }}>{memberCount} member{memberCount === 1 ? "" : "s"} joined</p>
           </Card>
+          {/* Coach identity, editable at any time — previously the profile
+              screen was only reachable by toggling the group public. */}
+          <button
+            onClick={() => {
+              setProfileNameInput(myCoachProfile?.display_name ?? "");
+              setProfileBioInput(myCoachProfile?.bio ?? "");
+              setProfileEditIntent("edit");
+              setGView("coach-profile-edit");
+            }}
+            className="flex items-center gap-3 p-3 rounded-2xl border text-left"
+            style={{ borderColor: C.border, background: C.surface }}>
+            <Avatar url={myCoachProfile?.avatar_url} size={44} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate" style={{ color: C.pri }}>
+                {myCoachProfile?.display_name?.trim() || "Set up your coach profile"}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: C.mut }}>
+                {myCoachProfile?.avatar_url && myCoachProfile?.banner_url
+                  ? "Edit name, bio and photos"
+                  : "Add your photo and banner"}
+              </p>
+            </div>
+            <ChevronRight size={18} style={{ color: C.mut, flexShrink: 0 }} />
+          </button>
+
           <Btn full variant="secondary" onClick={() => openCommunity(selectedGroup, "coach-detail")}>Community</Btn>
           <Btn full variant="secondary" onClick={() => openMembers(selectedGroup, "coach-detail")}>Manage members</Btn>
           <button
             onClick={async () => {
               const next = !selectedGroup.is_public;
-              if (next && !myCoachProfile) { setGView("coach-profile-edit"); return; }
+              if (next && !myCoachProfile) { setProfileEditIntent("make-public"); setGView("coach-profile-edit"); return; }
               const { error: err } = await setGroupPublic(selectedGroup.id, next);
               if (err) { alert(err); return; }
               setSelectedGroup({ ...selectedGroup, is_public: next });
@@ -2088,12 +2182,32 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
         {backHeader("Create a group", () => { setGView("list"); setCreatedCode(null); })}
         <div className="flex flex-col gap-3 px-5 pt-5 pb-28 flex-1">
           {createdCode ? (
-            <Card>
-              <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Group created</p>
-              <p className="text-xs mb-3" style={{ color: C.mut }}>Share this code with your team so they can join:</p>
-              <p className="text-2xl font-bold font-mono text-center py-3" style={{ color: C.accent }}>{createdCode}</p>
-              <Btn full onClick={() => { setCreatedCode(null); setGView("list"); }}>Done</Btn>
-            </Card>
+            <>
+              <Card>
+                <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Group created</p>
+                <p className="text-xs mb-3" style={{ color: C.mut }}>Share this code with your team so they can join:</p>
+                <p className="text-2xl font-bold font-mono text-center py-3" style={{ color: C.accent }}>{createdCode}</p>
+              </Card>
+
+              {/* Photos are prompted here rather than on the form above,
+                  because the coach profile row has to exist before an image
+                  can be attached to it. Skippable — a coach without photos
+                  still works, they just get the plain green home card. */}
+              {(!myCoachProfile?.avatar_url || !myCoachProfile?.banner_url) && (
+                <Card>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Avatar url={myCoachProfile?.avatar_url} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.pri }}>Add your photo and banner</p>
+                      <p className="text-xs mt-0.5" style={{ color: C.mut }}>They show on your members' home screen.</p>
+                    </div>
+                  </div>
+                  <Btn full onClick={() => { setCreatedCode(null); setProfileEditIntent("edit"); setGView("coach-profile-edit"); }}>Add photos</Btn>
+                </Card>
+              )}
+
+              <Btn full variant="secondary" onClick={() => { setCreatedCode(null); setGView("list"); }}>Done</Btn>
+            </>
           ) : (
             <>
               <Input label="Group name" value={nameInput} onChange={setNameInput} placeholder="e.g. Morning Crew" />
@@ -2111,10 +2225,10 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
                 </div>
               </button>
 
-              {makePublicOnCreate && !myCoachProfile && (
+              {!myCoachProfile && (
                 <Card>
                   <p className="text-sm font-semibold mb-1" style={{ color: C.pri }}>Set up your coach profile</p>
-                  <p className="text-xs mb-3" style={{ color: C.mut }}>Shown to anyone who finds this group in Discover — you only need to do this once.</p>
+                  <p className="text-xs mb-3" style={{ color: C.mut }}>Your members see this on their home screen when they follow your plans. You'll add your photo and banner next — you only do this once.</p>
                   <div className="flex flex-col gap-3">
                     <Input label="Display name" value={profileNameInput} onChange={setProfileNameInput} placeholder="e.g. Coach Jordan" />
                     <Input label="Bio (optional)" value={profileBioInput} onChange={setProfileBioInput} placeholder="A line about your coaching style" />
@@ -2200,10 +2314,12 @@ function GroupsSection({ onBack, onStartCoachPlan }: { onBack: () => void; onSta
             if (err) { setError(err); return; }
             const profile = await getMyCoachProfile();
             setMyCoachProfile(profile);
-            if (selectedGroup) {
+            if (selectedGroup && profileEditIntent === "make-public") {
               const { error: pubErr } = await setGroupPublic(selectedGroup.id, true);
               if (!pubErr) setSelectedGroup({ ...selectedGroup, is_public: true });
               await loadList();
+              setGView("coach-detail");
+            } else if (selectedGroup) {
               setGView("coach-detail");
             } else {
               setGView("list");
@@ -4796,12 +4912,50 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
   const goals = getGoals();
   const [showCalc, setShowCalc] = useState(!!autoOpenCalculator);
   const [showFAQ, setShowFAQ] = useState(false);
+  const [myProfile, setMyProfile] = useState<UserProfile | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminReview, setShowAdminReview] = useState(false);
   useEffect(() => { amIAdmin().then(setIsAdmin); }, []);
   const [showAbout, setShowAbout] = useState(false);
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
+
+  // Load the member's public profile (picture + display name). Kept in its
+  // own public table, separate from the private `profiles` row, so other
+  // members can actually see it.
+  useEffect(() => {
+    let cancelled = false;
+    getMyUserProfile().then(pr => { if (!cancelled) setMyProfile(pr); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Mirror the name they set in the app into the public profile, so their
+  // community posts show a name next to the picture instead of "Member".
+  useEffect(() => {
+    const n = cfg.name?.trim();
+    if (!n || !myProfile || myProfile.display_name === n) return;
+    syncMyDisplayName(n).then(() => setMyProfile(p => p ? { ...p, display_name: n } : p));
+  }, [cfg.name, myProfile?.user_id, myProfile?.display_name]);
+
+  async function handleAvatar(file: File) {
+    setAvatarError(""); setAvatarBusy(true);
+    const { error: err } = await uploadMyAvatar(file);
+    if (!err && cfg.name?.trim()) await syncMyDisplayName(cfg.name.trim());
+    setAvatarBusy(false);
+    if (err) { setAvatarError(err); return; }
+    setMyProfile(await getMyUserProfile());
+  }
+
+  async function handleRemoveAvatar() {
+    setAvatarError(""); setAvatarBusy(true);
+    const { error: err } = await removeMyAvatar();
+    setAvatarBusy(false);
+    if (err) { setAvatarError(err); return; }
+    setMyProfile(await getMyUserProfile());
+  }
+
 
   function editField(label: string, key: "name" | "email" | "goal", currentVal: string) {
     const v = prompt(`Edit ${label}`, currentVal);
@@ -4877,8 +5031,27 @@ function ProfileScreen({ onClose, autoOpenCalculator }: { onClose: () => void; a
       <div className="flex-1 overflow-y-auto pb-8" style={{ scrollbarWidth: "none" }}>
         {/* Profile header */}
         <div className="flex flex-col items-center py-8 gap-3 border-b" style={{ borderColor: C.border }}>
-          <div className="w-20 h-20 rounded-full border-2 flex items-center justify-center" style={{ borderColor: C.border, background: C.surfaceAlt, color: C.mut }}>
-            <User size={32} />
+          <div className="flex flex-col items-center gap-2">
+            <label className="relative cursor-pointer block">
+              <input type="file" accept="image/*" className="hidden" disabled={avatarBusy}
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleAvatar(f); e.target.value = ""; }} />
+              <div className="rounded-full border-2 overflow-hidden flex items-center justify-center"
+                style={{ width: 80, height: 80, borderColor: C.border, background: C.surfaceAlt, color: C.mut }}>
+                {myProfile?.avatar_url
+                  ? <img src={myProfile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <User size={32} />}
+              </div>
+              {/* Small camera badge so it reads as tappable rather than decorative */}
+              <div className="absolute rounded-full flex items-center justify-center"
+                style={{ width: 26, height: 26, right: -2, bottom: -2, background: C.accent, color: C.accentFg, border: `2px solid ${C.bg}` }}>
+                <Camera size={13} />
+              </div>
+            </label>
+            {avatarBusy && <p className="text-xs" style={{ color: C.mut }}>Uploading…</p>}
+            {!avatarBusy && myProfile?.avatar_url && (
+              <button className="text-xs" style={{ color: C.mut }} onClick={handleRemoveAvatar}>Remove photo</button>
+            )}
+            {avatarError && <p className="text-xs text-center px-6" style={{ color: C.err }}>{avatarError}</p>}
           </div>
           <button className="text-center" onClick={() => editField("your name", "name", cfg.name ?? "")}>
             <p className="text-lg font-bold" style={{ color: C.pri }}>{cfg.name?.trim() || "Add your name"}</p>

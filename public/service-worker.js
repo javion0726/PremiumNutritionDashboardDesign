@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ascend-v2-v48'; // bump on every deploy so users get fresh files, not a stuck cache
+const CACHE_NAME = 'ascend-v2-v49'; // bump on every deploy so users get fresh files, not a stuck cache
 const PRECACHE_URLS = [
   '/',
   '/index.html',
